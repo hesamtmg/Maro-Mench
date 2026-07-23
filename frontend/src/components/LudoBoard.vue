@@ -55,6 +55,7 @@ interface OccupiedCell {
   seatIndex: number;
   token: LudoToken;
   color: string;
+  displayName: string;
   selectable: boolean;
   row?: number;
   col?: number;
@@ -84,6 +85,7 @@ const trackTokens = computed(() => {
         seatIndex: player.seatIndex,
         token,
         color: player.color ?? SEAT_FALLBACK_COLORS[player.seatIndex],
+        displayName: player.displayName,
         selectable: canSelectNow.value && myTokenIds.value.has(token.tokenId),
         row: cell[0],
         col: cell[1],
@@ -100,10 +102,13 @@ function yardSlots(seatIndex: number): (OccupiedCell | null)[] {
     (t) => t.position === -1,
   );
   const color = colorForSeat(seatIndex);
+  const displayName =
+    props.players.find((p) => p.seatIndex === seatIndex)?.displayName ?? '';
   const slots: (OccupiedCell | null)[] = tokens.map((token) => ({
     seatIndex,
     token,
     color,
+    displayName,
     selectable: canSelectNow.value && myTokenIds.value.has(token.tokenId),
   }));
   while (slots.length < 4) slots.push(null);
@@ -230,6 +235,7 @@ function onTokenClick(occupant: OccupiedCell) {
               :class="{ selectable: occupant.selectable }"
               :style="{ background: occupant.color }"
               :disabled="!occupant.selectable"
+              :title="occupant.displayName"
               @click="onTokenClick(occupant)"
             />
           </div>
@@ -284,6 +290,7 @@ function onTokenClick(occupant: OccupiedCell) {
             gridColumn: `${occupant.col} / span 1`,
           }"
           :disabled="!occupant.selectable"
+          :title="occupant.displayName"
           @click="onTokenClick(occupant)"
         />
       </TransitionGroup>
@@ -566,7 +573,8 @@ function onTokenClick(occupant: OccupiedCell) {
   border: 2px dashed rgba(0, 0, 0, 0.55);
   opacity: 0.6;
   padding: 0;
-  cursor: pointer;
+  /* No cursor override here -- falls through to the global big blue
+     button cursor (style.css) instead of a plain system pointer. */
   animation: dot-pulse 1s ease-in-out infinite;
 }
 
@@ -611,7 +619,6 @@ function onTokenClick(occupant: OccupiedCell) {
     inset 0 3px 4px rgba(255, 255, 255, 0.45);
   border: 1.5px solid rgba(0, 0, 0, 0.35);
   padding: 0;
-  cursor: default;
   animation: pop-in 0.2s ease-out;
   overflow: hidden;
 }
@@ -638,7 +645,6 @@ function onTokenClick(occupant: OccupiedCell) {
 }
 
 .token.selectable {
-  cursor: pointer;
   box-shadow:
     0 0 0 3px rgba(168, 85, 247, 0.7),
     0 3px 6px rgba(0, 0, 0, 0.5),
@@ -646,7 +652,7 @@ function onTokenClick(occupant: OccupiedCell) {
     inset 0 3px 4px rgba(255, 255, 255, 0.45);
   animation:
     pop-in 0.2s ease-out,
-    pulse 1s ease-in-out infinite;
+    token-shake 0.5s ease-in-out infinite;
 }
 
 @keyframes pop-in {
@@ -660,13 +666,26 @@ function onTokenClick(occupant: OccupiedCell) {
   }
 }
 
-@keyframes pulse {
+/* Only the tokens you can actually choose from right now shake -- since
+   .selectable is already gated to that exact set (see canSelectNow /
+   myTokenIds above), this naturally never touches other players' or
+   your own non-choosable tokens. */
+@keyframes token-shake {
   0%,
   100% {
-    transform: scale(1);
+    transform: translateX(0) rotate(0deg);
   }
-  50% {
-    transform: scale(1.12);
+  20% {
+    transform: translateX(-3px) rotate(-6deg);
+  }
+  40% {
+    transform: translateX(3px) rotate(6deg);
+  }
+  60% {
+    transform: translateX(-2px) rotate(-4deg);
+  }
+  80% {
+    transform: translateX(2px) rotate(4deg);
   }
 }
 

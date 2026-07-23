@@ -30,6 +30,10 @@ const props = defineProps<{
   currentTurnSeat?: number | null;
   mySeatIndex?: number | null;
   diceValue?: number | null;
+  // Set when the page itself renders an equivalent player-status panel
+  // elsewhere (e.g. RoomView's sidebar on wide screens), so it isn't
+  // shown twice.
+  hidePlayerSummary?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -318,7 +322,7 @@ function onTokenClick(occupant: OccupiedCell) {
       </TransitionGroup>
     </div>
 
-    <div class="stack player-summary">
+    <div v-if="!hidePlayerSummary" class="stack player-summary">
       <div
         v-for="player in props.players"
         :key="player.userId"

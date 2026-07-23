@@ -26,7 +26,7 @@ export const WS_EVENTS_OUT = {
   DICE_ROLLED: 'dice_rolled', // { seatIndex, diceValue }
   AWAITING_MOVE_CHOICE: 'awaiting_move_choice', // { seatIndex, diceValue, options }
   MOVE_APPLIED: 'move_applied', // { boardState, nextTurnSeat, movePayload }
-  TURN_SKIPPED: 'turn_skipped', // { seatIndex, reason }
+  TURN_SKIPPED: 'turn_skipped', // { seatIndex, reason, nextTurnSeat }
   GAME_OVER: 'game_over', // { winnerSeat }
   QUEUE_JOINED: 'queue_joined', // { ticketId }
   QUEUE_CANCELLED: 'queue_cancelled',

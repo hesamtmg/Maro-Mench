@@ -3,9 +3,11 @@ import { connectSocket, getSocket } from '../api/socket.client';
 import { WS_EVENTS_IN, WS_EVENTS_OUT } from '../api/ws-events.constants';
 import {
   playAhh,
+  playCrash,
   playHooray,
   playStairs,
   playSwallow,
+  playVictoryFanfare,
 } from '../lib/game-sounds';
 import { useToastStore } from './toast.store';
 import type { Room } from '../types';
@@ -44,6 +46,7 @@ interface GameOverEvent {
 interface TurnSkippedEvent {
   seatIndex: number;
   reason: string;
+  nextTurnSeat: number;
 }
 
 interface PlayerPresenceEvent {
@@ -165,6 +168,9 @@ export const useRoomStore = defineStore('room', {
         }, 500);
         const name = displayNameForSeat(this.room, payload.seatIndex);
         this.pushEvent(`🎲 ${name} rolled a ${payload.diceValue}.`);
+        if (payload.diceValue === 6) {
+          playHooray();
+        }
       });
 
       socket.on(
@@ -213,7 +219,7 @@ export const useRoomStore = defineStore('room', {
             ),
           ].join(', ');
           this.pushEvent(`💥 ${name} sent ${capturedNames} home!`);
-          playHooray();
+          playCrash();
           this.triggerCelebration('victory');
         } else if (
           isSnakesLadders &&
@@ -241,6 +247,10 @@ export const useRoomStore = defineStore('room', {
         this.awaitingDiceValue = null;
         this.isRolling = false;
         this.lastDiceValue = null;
+        // This was missing entirely before -- without it, currentTurnSeat
+        // stayed pointed at the skipped player forever, so no one's
+        // client ever agreed on whose turn it actually was.
+        this.currentTurnSeat = payload.nextTurnSeat;
         this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         const name = displayNameForSeat(this.room, payload.seatIndex);
         toastStore.info(`${name}'s turn was skipped (${payload.reason}).`);
@@ -257,7 +267,7 @@ export const useRoomStore = defineStore('room', {
             ? displayNameForSeat(this.room, payload.winnerSeat)
             : null;
         this.pushEvent(name ? `🏆 ${name} won the game!` : '🏁 Game over.');
-        playHooray();
+        playVictoryFanfare();
         this.triggerCelebration('victory');
       });
 

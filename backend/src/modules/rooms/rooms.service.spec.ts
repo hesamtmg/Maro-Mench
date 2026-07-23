@@ -36,7 +36,7 @@ function createMockRepo(): MockRepo {
 const LUDO_GAME_TYPE: GameType = {
   id: 1,
   code: GameTypeCode.LUDO,
-  name: 'Ludo (منچ)',
+  name: 'Ludo',
   minPlayers: 2,
   maxPlayers: 4,
 };

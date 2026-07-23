@@ -6,13 +6,13 @@ import { GameType, GameTypeCode } from './entities/game-type.entity';
 const DEFAULT_GAME_TYPES: Array<Omit<GameType, 'id'>> = [
   {
     code: GameTypeCode.LUDO,
-    name: 'Ludo (منچ)',
+    name: 'Ludo',
     minPlayers: 2,
     maxPlayers: 4,
   },
   {
     code: GameTypeCode.SNAKES_LADDERS,
-    name: 'Snakes & Ladders (ماروپله)',
+    name: 'Snakes & Ladders',
     minPlayers: 2,
     maxPlayers: 16,
   },

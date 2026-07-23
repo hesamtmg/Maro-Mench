@@ -1,6 +1,6 @@
-# MaroMench (منچ & ماروپله)
+# MaroMench
 
-Online multiplayer Ludo (منچ) and Snakes & Ladders (ماروپله), built with
+Online multiplayer Ludo and Snakes & Ladders , built with
 NestJS + Socket.io, Vue 3, and Postgres.
 
 ## Project structure

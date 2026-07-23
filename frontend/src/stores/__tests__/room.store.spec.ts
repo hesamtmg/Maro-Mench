@@ -229,11 +229,13 @@ describe('room store', () => {
       fakeSocket.trigger(WS_EVENTS_OUT.TURN_SKIPPED, {
         seatIndex: 0,
         reason: 'timeout',
+        nextTurnSeat: 1,
       });
 
       expect(store.isRolling).toBe(false);
       expect(store.awaitingMoveChoice).toBe(false);
       expect(store.lastDiceValue).toBeNull();
+      expect(store.currentTurnSeat).toBe(1);
     });
 
     it('sets winnerSeat on game_over', () => {

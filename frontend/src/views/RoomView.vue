@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { roomsApi } from '../api/rooms.api';
-import DiceRoller from '../components/DiceRoller.vue';
-import LudoBoard from '../components/LudoBoard.vue';
-import PlayerList from '../components/PlayerList.vue';
-import SnakesLaddersBoard from '../components/SnakesLaddersBoard.vue';
-import { useMySeat } from '../composables/useMySeat';
-import { useAuthStore } from '../stores/auth.store';
-import { useRoomStore } from '../stores/room.store';
-import { useToastStore } from '../stores/toast.store';
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import { roomsApi } from "../api/rooms.api";
+import DiceRoller from "../components/DiceRoller.vue";
+import LudoBoard from "../components/LudoBoard.vue";
+import { FINISHED_POSITION } from "../components/ludo/board-geometry";
+import PlayerList from "../components/PlayerList.vue";
+import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
+import { useMySeat } from "../composables/useMySeat";
+import { useAuthStore } from "../stores/auth.store";
+import { useRoomStore } from "../stores/room.store";
+import { useToastStore } from "../stores/toast.store";
 
 const props = defineProps<{ id: string }>();
 
@@ -20,7 +21,7 @@ const toastStore = useToastStore();
 const { myPlayer, isAdmin, isMyTurn } = useMySeat();
 
 const isLoading = ref(true);
-const loadError = ref('');
+const loadError = ref("");
 
 // Ticks while a game is in progress so secondsLeft below stays live;
 // cheap enough at 4Hz and only running while there's a deadline to show.
@@ -35,6 +36,25 @@ onUnmounted(() => {
   if (clockHandle) clearInterval(clockHandle);
 });
 
+// Gates the desktop sidebar layout vs. the original mobile stacked
+// layout below -- an actual viewport check, not just CSS reshuffling of
+// the same markup, so mobile renders the exact same structure it always
+// did instead of a reordered version of the desktop one.
+const DESKTOP_LAYOUT_BREAKPOINT = 900;
+const isWideLayout = ref(
+  typeof window !== "undefined" &&
+    window.innerWidth > DESKTOP_LAYOUT_BREAKPOINT
+);
+function updateIsWideLayout() {
+  isWideLayout.value = window.innerWidth > DESKTOP_LAYOUT_BREAKPOINT;
+}
+onMounted(() => {
+  window.addEventListener("resize", updateIsWideLayout);
+});
+onUnmounted(() => {
+  window.removeEventListener("resize", updateIsWideLayout);
+});
+
 const secondsLeft = computed(() => {
   if (roomStore.turnDeadline == null) return null;
   return Math.max(0, Math.ceil((roomStore.turnDeadline - now.value) / 1000));
@@ -42,14 +62,14 @@ const secondsLeft = computed(() => {
 
 async function initRoom() {
   isLoading.value = true;
-  loadError.value = '';
+  loadError.value = "";
   try {
     // Ensure we're actually a member (handles direct-link / refresh cases).
     await roomsApi.getRoom(props.id);
     roomStore.connect();
     roomStore.joinRoom(props.id);
   } catch {
-    loadError.value = 'Could not load this room. It may no longer exist.';
+    loadError.value = "Could not load this room. It may no longer exist.";
   } finally {
     isLoading.value = false;
   }
@@ -69,7 +89,7 @@ function handleSelectToken(tokenId: number) {
 
 async function handleLeaveRoom() {
   roomStore.leaveRoom(props.id);
-  await router.push({ name: 'lobby' });
+  await router.push({ name: "lobby" });
 }
 
 function handleKick(userId: string) {
@@ -79,7 +99,7 @@ function handleKick(userId: string) {
 function handleDeleteRoom() {
   if (
     !window.confirm(
-      'Delete this room? Everyone will be removed and this cannot be undone.',
+      "Delete this room? Everyone will be removed and this cannot be undone."
     )
   ) {
     return;
@@ -96,26 +116,53 @@ watch(
   () => roomStore.room,
   (room, previousRoom) => {
     if (previousRoom && !room) {
-      void router.push({ name: 'lobby' }).catch(() => {});
+      void router.push({ name: "lobby" }).catch(() => {});
     }
-  },
+  }
 );
 
 function handleCopyCode() {
   const code = roomStore.room?.code;
   if (!code) return;
   void navigator.clipboard.writeText(code).then(() => {
-    toastStore.success('Room code copied!');
+    toastStore.success("Room code copied!");
   });
 }
 
 const gameTypeCode = computed(() => roomStore.room?.gameType.code);
 
+// Player-status stats, moved here from inside LudoBoard/SnakesLaddersBoard
+// so the sidebar can render them next to the board on wide screens
+// instead of only below it.
+function ludoHomeCount(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    tokens?: Record<number, Array<{ position: number }>>;
+  } | null;
+  return (state?.tokens?.[seatIndex] ?? []).filter((t) => t.position === -1)
+    .length;
+}
+
+function ludoFinishedCount(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    tokens?: Record<number, Array<{ position: number }>>;
+  } | null;
+  return (state?.tokens?.[seatIndex] ?? []).filter(
+    (t) => t.position === FINISHED_POSITION
+  ).length;
+}
+
+function snakesLaddersPosition(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    positions?: Record<number, number>;
+  } | null;
+  return state?.positions?.[seatIndex] ?? 0;
+}
+
 const myLudoTokens = computed(() => {
-  if (!myPlayer.value || gameTypeCode.value !== 'ludo') return [];
-  const state = roomStore.boardState as
-    | { tokens: Record<number, Array<{ tokenId: number; position: number }>> }
-    | null;
+  if (!myPlayer.value || gameTypeCode.value !== "ludo") return [];
+  const state = roomStore.boardState as {
+    tokens: Record<number, Array<{ tokenId: number; position: number }>>;
+  } | null;
   return state?.tokens?.[myPlayer.value.seatIndex] ?? [];
 });
 
@@ -125,7 +172,7 @@ const winnerName = computed(() => {
   }
   return (
     roomStore.room?.players.find((p) => p.seatIndex === roomStore.winnerSeat)
-      ?.displayName ?? 'A player'
+      ?.displayName ?? "A player"
   );
 });
 
@@ -133,17 +180,16 @@ const winnerName = computed(() => {
 // actually underway (not waiting, not already finished).
 const showTurnInfo = computed(
   () =>
-    roomStore.room?.status === 'in_progress' &&
+    roomStore.room?.status === "in_progress" &&
     !!roomStore.boardState &&
-    !winnerName.value,
+    !winnerName.value
 );
 
 const canStartGame = computed(() => {
   const room = roomStore.room;
   if (!room || !isAdmin.value) return false;
   return (
-    room.status === 'waiting' &&
-    room.players.length >= room.gameType.minPlayers
+    room.status === "waiting" && room.players.length >= room.gameType.minPlayers
   );
 });
 
@@ -153,7 +199,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-container-wide">
+  <div
+    class="page-container-wide"
+    :class="{ 'page-wide-game': roomStore.boardState }"
+  >
     <p v-if="isLoading" class="text-muted text-center">Loading room…</p>
     <p v-else-if="loadError" class="error-text text-center">
       {{ loadError }}
@@ -161,16 +210,36 @@ onMounted(() => {
 
     <template v-else-if="roomStore.room">
       <div class="game-header">
-        <div class="header-title">
-          <h1 class="game-title">{{ roomStore.room.gameType.name }}</h1>
-          <button
-            v-if="roomStore.room.code"
-            class="code-chip"
-            title="Copy room code"
-            @click="handleCopyCode"
-          >
-            Code: <strong>{{ roomStore.room.code }}</strong> 📋
-          </button>
+        <div class="header-title " style="display: flex;flex-direction: row;">
+          <div style="width: 100%;">
+            <h1 class="game-title">{{ roomStore.room.gameType.name }}</h1>
+            <button
+              v-if="roomStore.room.code"
+              class="code-chip"
+              title="Copy room code"
+              @click="handleCopyCode"
+            >
+              Code: <strong>{{ roomStore.room.code }}</strong> 📋
+            </button>
+          </div>
+          <div style="display:flex;flex-direction: row;width: 100%;">
+            <button
+              v-if="isAdmin"
+              style="margin-left: 10px;"
+              class="btn btn-danger delete-room-btn"
+              @click="handleDeleteRoom"
+            >
+            Remove
+            </button>
+
+            <button
+              style="margin-left: 10px;"
+              class="btn btn-secondary leave-btn "
+              @click="handleLeaveRoom"
+            >
+              Leave
+            </button>
+          </div>
         </div>
 
         <div class="header-actions">
@@ -182,8 +251,8 @@ onMounted(() => {
               <span v-else class="turn-badge">
                 {{
                   roomStore.room.players.find(
-                    (p) => p.seatIndex === roomStore.currentTurnSeat,
-                  )?.displayName ?? 'Other player'
+                    (p) => p.seatIndex === roomStore.currentTurnSeat
+                  )?.displayName ?? "Other player"
                 }}'s turn…
               </span>
               <span
@@ -207,24 +276,9 @@ onMounted(() => {
               :disabled="roomStore.isRolling"
               @click="handleRollDice"
             >
-              {{ roomStore.isRolling ? 'Rolling…' : 'Roll dice' }}
+              {{ roomStore.isRolling ? "Rolling…" : "Roll dice" }}
             </button>
           </div>
-
-          <button
-            v-if="isAdmin"
-            class="btn btn-danger delete-room-btn"
-            @click="handleDeleteRoom"
-          >
-            Delete room
-          </button>
-
-          <button
-            class="btn btn-secondary leave-btn"
-            @click="handleLeaveRoom"
-          >
-            Leave room
-          </button>
         </div>
       </div>
 
@@ -267,7 +321,79 @@ onMounted(() => {
         </button>
       </div>
 
-      <!-- In-progress game -->
+      <!-- In-progress game, desktop: sidebar (player status + activity)
+           to the left of the board. Gated on an actual viewport check
+           (isWideLayout), not a CSS reflow of the mobile markup below. -->
+      <div
+        v-else-if="roomStore.boardState && isWideLayout"
+        class="game-layout"
+      >
+        <aside class="game-sidebar">
+          <div class="card player-status-panel">
+            <h4 class="panel-title">Players</h4>
+            <div
+              v-for="player in roomStore.room.players"
+              :key="player.userId"
+              class="row player-row"
+              :class="{
+                'player-row-active': player.seatIndex === roomStore.currentTurnSeat,
+              }"
+            >
+              <span
+                class="color-dot"
+                :style="{ background: player.color ?? '#4f46e5' }"
+              />
+              <strong>{{ player.displayName }}</strong>
+              <span v-if="gameTypeCode === 'ludo'" class="text-muted">
+                Home: {{ ludoHomeCount(player.seatIndex) }} · Finished:
+                {{ ludoFinishedCount(player.seatIndex) }} / 4
+              </span>
+              <span v-else-if="gameTypeCode === 'snakes_ladders'" class="text-muted">
+                Square {{ snakesLaddersPosition(player.seatIndex) }} / 100
+              </span>
+            </div>
+          </div>
+
+          <!-- Activity log: newest event on top, oldest fading out at the
+               bottom of the scrollable window rather than cutting off
+               abruptly. -->
+          <div v-if="roomStore.eventLog.length" class="event-log card">
+            <h4 class="event-log-title">Activity</h4>
+            <ul class="event-log-list">
+              <li v-for="entry in roomStore.eventLog" :key="entry.id">
+                {{ entry.message }}
+              </li>
+            </ul>
+          </div>
+        </aside>
+
+        <div class="game-board-area">
+          <LudoBoard
+            v-if="gameTypeCode === 'ludo'"
+            :board-state="roomStore.boardState as any"
+            :players="roomStore.room.players"
+            :is-my-turn="isMyTurn"
+            :awaiting-move-choice="roomStore.awaitingMoveChoice"
+            :my-tokens="myLudoTokens"
+            :current-turn-seat="roomStore.currentTurnSeat"
+            :my-seat-index="myPlayer?.seatIndex ?? null"
+            :dice-value="roomStore.awaitingDiceValue"
+            hide-player-summary
+            @select-token="handleSelectToken"
+          />
+          <SnakesLaddersBoard
+            v-else-if="gameTypeCode === 'snakes_ladders'"
+            :board-state="roomStore.boardState as any"
+            :players="roomStore.room.players"
+            :current-turn-seat="roomStore.currentTurnSeat"
+            hide-player-summary
+          />
+        </div>
+      </div>
+
+      <!-- In-progress game, mobile: the original stacked layout, exactly
+           as it was -- board (with its own built-in player summary),
+           then the activity log below it. -->
       <div v-else-if="roomStore.boardState" class="stack">
         <LudoBoard
           v-if="gameTypeCode === 'ludo'"
@@ -288,9 +414,6 @@ onMounted(() => {
           :current-turn-seat="roomStore.currentTurnSeat"
         />
 
-        <!-- Activity log: newest event on top, oldest fading out at the
-             bottom of the scrollable window rather than cutting off
-             abruptly. -->
         <div v-if="roomStore.eventLog.length" class="event-log card">
           <h4 class="event-log-title">Activity</h4>
           <ul class="event-log-list">
@@ -313,7 +436,7 @@ onMounted(() => {
         :class="roomStore.celebration"
       >
         <span class="celebration-emoji">{{
-          roomStore.celebration === 'victory' ? '🎉' : '😬'
+          roomStore.celebration === "victory" ? "🎉" : "😬"
         }}</span>
       </div>
     </Transition>
@@ -352,6 +475,7 @@ onMounted(() => {
    two separately-aligned rows -- reads as a single unit instead of
    scattered controls. */
 .turn-pill {
+  width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -414,11 +538,66 @@ onMounted(() => {
     justify-content: space-between;
   }
 
-  .leave-btn,
-  .delete-room-btn {
+  .leave-btn {
     padding: 0.45rem 1rem;
     font-size: 0.85rem;
   }
+}
+
+/* Wider than the default page-container-wide, only while a game is in
+   progress, so there's actually room for the sidebar beside the board
+   instead of everything getting cramped. */
+.page-wide-game {
+  max-width: 1200px;
+}
+
+/* Sidebar (player status + activity) to the left of the board on wide
+   screens; the board area shrinks/grows to fill whatever's left. */
+.game-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.game-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* Visually first (left of the board), regardless of source order. */
+  order: -1;
+}
+
+.game-board-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.player-row {
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius);
+  transition: background 0.2s ease;
+}
+
+.player-row-active {
+  background: rgba(147, 51, 234, 0.18);
 }
 
 .event-log {
@@ -449,11 +628,7 @@ onMounted(() => {
   /* Fades the bottom of the visible window so the list reads as
      "continues below", rather than looking like it cuts off abruptly. */
   mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    black 70%,
-    transparent 100%
-  );
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
 }
 
 .code-chip {

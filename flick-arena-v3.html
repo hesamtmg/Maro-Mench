@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FLICK — a disc arena game</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<style>
+  :root {
+    --ink: #14110f;
+    --bone: #ede7db;
+    --p1: #e0562a;
+    --p2: #4a5fc1;
+    --line: rgba(237,231,219,0.14);
+    --line-strong: rgba(237,231,219,0.28);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: var(--ink);
+    color: var(--bone);
+    font-family: 'Courier New', ui-monospace, monospace;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #app { height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; }
+
+  /* ---------- Title screen ---------- */
+  #title {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 26px;
+    background:
+      radial-gradient(circle at 30% 15%, rgba(224,86,42,0.12), transparent 45%),
+      radial-gradient(circle at 75% 85%, rgba(74,95,193,0.12), transparent 45%),
+      var(--ink);
+    z-index: 50;
+    padding: 24px;
+  }
+  .wordmark {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-weight: 700; font-style: italic;
+    font-size: clamp(56px, 16vw, 108px);
+    letter-spacing: -2px; line-height: 0.85;
+    color: var(--bone); text-align: center;
+  }
+  .wordmark span { color: var(--p1); }
+  .tagline { font-size: 12px; letter-spacing: 4px; text-transform: uppercase; opacity: 0.55; text-align: center; margin-top: -14px; }
+  .setup-block { display: flex; flex-direction: column; gap: 14px; align-items: center; width: 100%; max-width: 380px; }
+  .setup-label { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.5; }
+  .mode-row { display: flex; gap: 8px; }
+  .mode-btn {
+    padding: 10px 16px; border: 1.5px solid var(--line-strong); background: transparent;
+    color: var(--bone); font-family: inherit; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+    border-radius: 20px; cursor: pointer;
+  }
+  .mode-btn.active { background: var(--bone); color: var(--ink); border-color: var(--bone); }
+  #startBtn {
+    margin-top: 8px; padding: 16px 48px; background: var(--p1); color: var(--ink);
+    border: none; font-family: Georgia, serif; font-weight: 700; font-style: italic; font-size: 20px;
+    border-radius: 4px; cursor: pointer; letter-spacing: 0.5px;
+    box-shadow: 0 4px 0 rgba(0,0,0,0.35); transition: transform 0.1s ease;
+  }
+  #startBtn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); }
+  .rules-hint { font-size: 11px; opacity: 0.4; max-width: 320px; text-align: center; line-height: 1.6; }
+  #loadingNote { font-size: 11px; opacity: 0.35; }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); z-index: 10; flex-shrink: 0;
+  }
+  #turnBanner {
+    font-family: Georgia, serif; font-style: italic; font-weight: 700; font-size: 15px;
+    padding: 5px 14px; border-radius: 20px; transition: background 0.25s ease;
+  }
+  #scores { display: flex; gap: 10px; font-size: 12px; letter-spacing: 0.5px; }
+  .score-chip {
+    display: flex; align-items: center; gap: 6px; padding: 4px 9px;
+    border: 1px solid var(--line-strong); border-radius: 20px; opacity: 0.55;
+    transition: opacity 0.2s ease, border-color 0.2s ease;
+  }
+  .score-chip.current { opacity: 1; border-color: var(--bone); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  #menuBtn {
+    background: transparent; border: 1px solid var(--line-strong); color: var(--bone);
+    font-family: inherit; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+    padding: 6px 10px; border-radius: 16px; cursor: pointer;
+  }
+
+  /* ---------- Board ---------- */
+  #boardWrap {
+    flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; padding: 8px;
+  }
+  #board { touch-action: none; border-radius: 10px; box-shadow: 0 0 0 1px var(--line-strong), 0 30px 60px -20px rgba(0,0,0,0.6); }
+
+  #toast {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%) translateY(-10px);
+    font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+    padding: 7px 16px; background: var(--bone); color: var(--ink); border-radius: 20px;
+    opacity: 0; transition: all 0.25s ease; pointer-events: none; z-index: 30; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- Win overlay ---------- */
+  #winOverlay {
+    position: absolute; inset: 0; background: rgba(20,17,15,0.92);
+    display: none; align-items: center; justify-content: center; flex-direction: column; gap: 20px; z-index: 60;
+  }
+  #winOverlay.show { display: flex; }
+  #winText { font-family: Georgia, serif; font-style: italic; font-weight: 700; font-size: clamp(32px, 8vw, 56px); }
+  #rematchBtn {
+    padding: 14px 40px; background: var(--bone); color: var(--ink); border: none; border-radius: 4px;
+    font-family: inherit; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; cursor: pointer;
+  }
+
+  @media (max-width: 480px) {
+    .wordmark { font-size: 20vw; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TITLE / SETUP -->
+  <div id="title">
+    <div class="wordmark">FL<span>I</span>CK</div>
+    <div class="tagline">a shuffleboard-style disc duel</div>
+
+    <div class="setup-block">
+      <div class="setup-label">Opponent</div>
+      <div class="mode-row" id="modeRow">
+        <button class="mode-btn active" data-mode="hotseat">Pass & play</button>
+        <button class="mode-btn" data-mode="ai">vs Bot</button>
+      </div>
+    </div>
+
+    <button id="startBtn">Start match</button>
+    <div class="rules-hint">From your end: your free zone (staging), then your drop zone right next to it — push a disc just past your free zone to score. The board is walled on all sides, so discs bounce and can smash into each other anywhere on the table. Big discs hit hard but move slow; small discs are quick but light.</div>
+    <div id="loadingNote"></div>
+  </div>
+
+  <!-- GAME -->
+  <div id="hud" style="display:none;">
+    <div id="turnBanner">P1's turn</div>
+    <div id="scores"></div>
+    <button id="menuBtn">Menu</button>
+  </div>
+
+  <div id="boardWrap" style="display:none;">
+    <canvas id="board"></canvas>
+    <div id="toast"></div>
+  </div>
+
+  <div id="winOverlay">
+    <div id="winText">P1 wins</div>
+    <button id="rematchBtn">Rematch</button>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  if(typeof Matter === 'undefined'){
+    document.getElementById('loadingNote').textContent = 'Physics engine failed to load — check your connection and reload.';
+    return;
+  }
+
+  const { Engine, World, Bodies, Body, Composite, Vector, Events } = Matter;
+
+  // ---------------- Config ----------------
+  const COLORS = { p1: '#e0562a', p2: '#4a5fc1' };
+  const PLAYER_NAMES = ['P1','P2'];
+
+  // Rectangular shuffleboard layout, fractions of board HEIGHT:
+  const ZONE_DROP_H = 0.14;
+  const ZONE_FREE_H = 0.10;
+
+  // Disc weight/size — randomized per disc rather than fixed classes, but still grounded
+  // in one real physical trade-off: bigger + heavier discs are harder to accelerate and
+  // scrub off speed slower once moving (more momentum through contact); smaller + lighter
+  // discs are easy to flick fast but lose speed quicker and get knocked around more.
+  const DISC_R_MIN = 0.020, DISC_R_MAX = 0.068;   // fraction of board width — wide spread for a real big/small contrast
+  const DENSITY_MIN = 0.0006, DENSITY_MAX = 0.0034;
+  const DISCS_PER_PLAYER = 6;
+  const MAX_USES = 3; // each disc can be shot up to 3 times before it's eliminated
+
+  function randomDiscSpec(t){
+    // t is the size/weight position (0 = smallest/lightest .. 1 = biggest/heaviest),
+    // passed in by generateDiscSet so a full 6-disc set can guarantee its extremes.
+    const jitter = () => (Math.random()*2-1)*0.06;
+    const sizeT = Math.max(0, Math.min(1, t + jitter()));
+    const massT = Math.max(0, Math.min(1, t + jitter()));
+
+    const rFrac = DISC_R_MIN + sizeT*(DISC_R_MAX-DISC_R_MIN);
+    const density = DENSITY_MIN + massT*(DENSITY_MAX-DENSITY_MIN);
+    // heavier/bigger discs: less air friction relative loss (they coast further once
+    // moving) and lower restitution (duller, heavier-feeling bounce)
+    const frictionAir = 0.030 - massT*0.018;
+    const restitution = 0.48 - massT*0.24;
+
+    let cls = 'medium';
+    if(massT < 0.28) cls = 'light'; else if(massT > 0.72) cls = 'heavy';
+
+    return { rFrac, density, frictionAir, restitution, cls };
+  }
+
+  // Builds one player's full set of 6 discs: always exactly one very big/heavy, one
+  // very small/light, and four mid-range discs spread between — then shuffled so the
+  // big/small ones don't always end up in the same staging slot.
+  function generateDiscSet(){
+    const positions = [0, 1, 0.35, 0.45, 0.55, 0.65]; // 0=smallest, 1=biggest, rest mid-spread
+    const specs = positions.map(t => randomDiscSpec(t));
+    // shuffle
+    for(let i=specs.length-1; i>0; i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [specs[i], specs[j]] = [specs[j], specs[i]];
+    }
+    return specs;
+  }
+
+  const WALL_THICKNESS = 40;
+  const MAX_SWIPE_PXMS = 3.2;         // clamp on raw swipe speed before conversion
+
+  // ---------------- State ----------------
+  let vsAI = false;
+  let engine, world;
+  let discBodies = [];   // { body, owner, dir, cls, alive, used, scored }
+  let wallBodies = [];
+  let MEDIUM_MASS_REF = 1; // set from the medium disc class once bodies exist, used to normalize weight feel
+  let scores = [0,0];
+  let currentPlayer = 0;
+  let boardW = 380, boardH = 640;
+  let dpr = 1;
+  let gameOver = false;
+  let animating = false;
+  let settleCheckTimer = null;
+
+  // drag / swipe tracking
+  let dragging = false;
+  let dragBodyIdx = -1;
+  let dragOffset = {x:0,y:0};
+  let posHistory = [];
+
+  // ---------------- DOM ----------------
+  const titleEl = document.getElementById('title');
+  const hudEl = document.getElementById('hud');
+  const boardWrapEl = document.getElementById('boardWrap');
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const turnBannerEl = document.getElementById('turnBanner');
+  const scoresEl = document.getElementById('scores');
+  const toastEl = document.getElementById('toast');
+  const winOverlayEl = document.getElementById('winOverlay');
+  const winTextEl = document.getElementById('winText');
+
+  document.getElementById('modeRow').addEventListener('click', (e)=>{
+    const btn = e.target.closest('.mode-btn');
+    if(!btn) return;
+    document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    vsAI = btn.dataset.mode === 'ai';
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', ()=>{
+    titleEl.style.display = 'flex';
+    hudEl.style.display = 'none';
+    boardWrapEl.style.display = 'none';
+    winOverlayEl.classList.remove('show');
+    teardownEngine();
+  });
+  document.getElementById('rematchBtn').addEventListener('click', ()=>{
+    winOverlayEl.classList.remove('show');
+    startGame();
+  });
+
+  function playerColor(i){ return [COLORS.p1, COLORS.p2][i]; }
+
+  // ---------------- Engine lifecycle ----------------
+  function teardownEngine(){
+    if(engine){
+      Events.off(engine);
+      World.clear(world, false);
+      Engine.clear(engine);
+    }
+    engine = null; world = null;
+    discBodies = []; wallBodies = [];
+  }
+
+  function startGame(){
+    titleEl.style.display = 'none';
+    hudEl.style.display = 'flex';
+    boardWrapEl.style.display = 'flex';
+    gameOver = false;
+    scores = [0,0];
+    currentPlayer = 0;
+    resizeCanvas();
+    setupEngine();
+    createAllDiscs();
+    buildScoreChips();
+    updateTurnBanner();
+    requestAnimationFrame(loop);
+  }
+
+  function setupEngine(){
+    teardownEngine();
+    engine = Engine.create();
+    world = engine.world;
+    engine.gravity.x = 0;
+    engine.gravity.y = 0; // top-down table, no gravity — friction does the slowing
+    buildWalls();
+  }
+
+  function buildWalls(){
+    wallBodies.forEach(w => Composite.remove(world, w));
+    wallBodies = [];
+    const w = boardW, h = boardH;
+    const t = WALL_THICKNESS;
+    // all four sides are now solid walls — discs bounce, nothing falls off the table
+    const left = Bodies.rectangle(-t/2, h/2, t, h+t*2, { isStatic:true, restitution:0.55, friction:0.05, label:'wall' });
+    const right = Bodies.rectangle(w+t/2, h/2, t, h+t*2, { isStatic:true, restitution:0.55, friction:0.05, label:'wall' });
+    const top = Bodies.rectangle(w/2, -t/2, w+t*2, t, { isStatic:true, restitution:0.55, friction:0.05, label:'wall' });
+    const bottom = Bodies.rectangle(w/2, h+t/2, w+t*2, t, { isStatic:true, restitution:0.55, friction:0.05, label:'wall' });
+    wallBodies = [left, right, top, bottom];
+    Composite.add(world, wallBodies);
+  }
+
+  function buildScoreChips(){
+    scoresEl.innerHTML = '';
+    for(let i=0;i<2;i++){
+      const chip = document.createElement('div');
+      chip.className = 'score-chip';
+      chip.id = 'chip'+i;
+      chip.innerHTML = `<span class="dot" style="background:${playerColor(i)}"></span><span id="chipScore${i}">0</span>`;
+      scoresEl.appendChild(chip);
+    }
+  }
+  function updateScoreChips(){
+    for(let i=0;i<2;i++){
+      document.getElementById('chipScore'+i).textContent = scores[i];
+      document.getElementById('chip'+i).classList.toggle('current', i===currentPlayer);
+    }
+  }
+
+  function zoneRects(){
+    const w = boardW, h = boardH;
+    // Order from top (0) to bottom (h): P2 free, P1 drop, P2 drop, P1 free.
+    // Each player's drop zone is the FAR one — next to the OPPONENT's free zone —
+    // so scoring means sliding your disc most of the way up the table, past the
+    // neutral middle, right up against where your rival stages their discs.
+    return {
+      p2Free: {x:0, y:0, w:w, h:h*ZONE_FREE_H},
+      p1Drop: {x:0, y:h*ZONE_FREE_H, w:w, h:h*ZONE_DROP_H},
+      p2Drop: {x:0, y:h*(1-ZONE_DROP_H-ZONE_FREE_H), w:w, h:h*ZONE_DROP_H},
+      p1Free: {x:0, y:h*(1-ZONE_FREE_H), w:w, h:h*ZONE_FREE_H},
+    };
+  }
+
+  // ---------------- Disc creation (once per match) ----------------
+  function createAllDiscs(){
+    discBodies.forEach(d => Composite.remove(world, d.body));
+    discBodies = [];
+
+    const zr = zoneRects();
+    const layout = [
+      { owner:1, rect: zr.p1Free }, // P1 stages at bottom, shoots up
+      { owner:0, rect: zr.p2Free }, // P2 stages at top, shoots down
+    ];
+
+    layout.forEach(cfg=>{
+      const cy = cfg.rect.y + cfg.rect.h/2;
+      const specs = generateDiscSet();
+      const maxR = boardW * Math.max(...specs.map(s=>s.rFrac));
+      // spacing must clear the largest disc's diameter with a small margin, so two big
+      // discs shuffled next to each other don't spawn overlapping and pop apart violently
+      const minSpacing = maxR*2 + boardW*0.006;
+      const evenSpacing = cfg.rect.w / (DISCS_PER_PLAYER+1);
+      const spacing = Math.max(minSpacing, evenSpacing);
+      const totalW = spacing*(DISCS_PER_PLAYER-1);
+      const startX = cfg.rect.w/2 - totalW/2;
+      specs.forEach((spec, i)=>{
+        const cx = Math.max(boardW*spec.rFrac+2, Math.min(boardW-boardW*spec.rFrac-2, startX + spacing*i));
+        const r = boardW * spec.rFrac;
+        const body = Bodies.circle(cx, cy, r, {
+          density: spec.density,
+          frictionAir: spec.frictionAir,
+          restitution: spec.restitution,
+          friction: 0.01,
+          label: 'disc'
+        });
+        Composite.add(world, body);
+        discBodies.push({
+          body, r, owner: cfg.owner, cls: spec.cls,
+          alive: true,       // false once eliminated after MAX_USES shots
+          used: false,       // true while mid-flight this turn (locks input)
+          resting: false,    // true once parked anywhere but the enemy free zone
+          usesLeft: MAX_USES,
+          homeRect: cfg.rect
+        });
+      });
+    });
+
+    // stable weight-feel reference: the mass a disc would have at the exact midpoint of
+    // the size/density ranges — independent of which random discs actually spawned, so
+    // launch-speed scaling doesn't drift between matches.
+    const refR = boardW * (DISC_R_MIN+DISC_R_MAX)/2;
+    const refDensity = (DENSITY_MIN+DENSITY_MAX)/2;
+    MEDIUM_MASS_REF = Math.PI * refR*refR * refDensity;
+  }
+
+  // A disc that gets reset doesn't teleport — it glides smoothly back to its free zone
+  // over a short animation, tracked here and advanced each frame in the main loop.
+  let resetTweens = []; // { disc, fromX, fromY, toX, toY, start, duration }
+
+  function returnDiscToFreeZone(d){
+    const rect = d.homeRect;
+    const x = Math.max(d.r+2, Math.min(rect.w-d.r-2, d.body.position.x));
+    const y = rect.y + rect.h/2;
+
+    Body.setVelocity(d.body, {x:0,y:0});
+    Body.setAngularVelocity(d.body, 0);
+    Body.setStatic(d.body, true); // ignore collisions/physics while gliding home
+
+    resetTweens.push({
+      disc: d,
+      fromX: d.body.position.x, fromY: d.body.position.y,
+      toX: x, toY: y,
+      start: performance.now(),
+      duration: 420
+    });
+  }
+
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+
+  function updateResetTweens(now){
+    if(resetTweens.length===0) return;
+    resetTweens = resetTweens.filter(tw=>{
+      const t = Math.min(1, (now - tw.start) / tw.duration);
+      const e = easeOutCubic(t);
+      const x = tw.fromX + (tw.toX-tw.fromX)*e;
+      const y = tw.fromY + (tw.toY-tw.fromY)*e;
+      Body.setPosition(tw.disc.body, {x, y});
+      if(t >= 1){
+        Body.setStatic(tw.disc.body, false);
+        return false; // done, drop from the list
+      }
+      return true;
+    });
+  }
+
+  function availableDiscs(player){
+    return discBodies.filter(d => d.owner===player && d.alive && !d.used && !d.resting);
+  }
+
+  function findByBody(body){
+    return discBodies.find(d => d.body === body);
+  }
+
+  // ---------------- Physics driving ----------------
+  function isMoving(){
+    return discBodies.some(d => d.alive && (Body.getSpeed(d.body) > 0.06));
+  }
+
+  function stepEngine(delta){
+    Engine.update(engine, delta);
+  }
+
+  function pointInRect(px,py,rect){
+    return px>=rect.x && px<=rect.x+rect.w && py>=rect.y && py<=rect.y+rect.h;
+  }
+
+  function settleScoring(){
+    const zr = zoneRects();
+
+    // 1) resolve the disc(s) that were just shot and have now stopped moving.
+    // Reset (send back to your own free zone, costing a life) ONLY if the disc ends up
+    // sitting inside the OPPONENT's free zone — that's the one place it can't be left.
+    // Anywhere else (neutral field, either drop zone, even your own free zone) it just
+    // stays exactly where it stopped, as a live obstacle other shots can hit.
+    const justShot = discBodies.filter(d => d.alive && d.used);
+    for(const d of justShot){
+      const p = d.body.position;
+      const inOwnDrop = (d.owner===1 && pointInRect(p.x,p.y,zr.p1Drop)) ||
+                         (d.owner===0 && pointInRect(p.x,p.y,zr.p2Drop));
+      const inEnemyFree = (d.owner===1 && pointInRect(p.x,p.y,zr.p2Free)) ||
+                           (d.owner===0 && pointInRect(p.x,p.y,zr.p1Free));
+      d.used = false; // this turn's flight is over either way
+
+      if(inEnemyFree){
+        d.usesLeft -= 1;
+        if(d.usesLeft <= 0){
+          d.alive = false;
+          Composite.remove(world, d.body);
+          showToast(PLAYER_NAMES[d.owner] + " disc worn out");
+        } else {
+          returnDiscToFreeZone(d);
+          d.resting = false;
+          showToast(PLAYER_NAMES[d.owner] + " disc sent home");
+        }
+      } else if(inOwnDrop){
+        d.resting = true;
+        showToast(PLAYER_NAMES[d.owner] + ' scores!');
+      } else {
+        // stopped in the neutral field, own free zone, or opponent's drop zone —
+        // stays right there as a live obstacle, no life cost, not currently scoring
+        d.resting = true;
+      }
+    }
+
+    // 2) any disc that was PREVIOUSLY resting (parked somewhere, possibly scored) but
+    // got knocked by this turn's collisions into the opponent's free zone now needs to
+    // be sent home too — that's still the only reset trigger, just discovered via a
+    // collision rather than its own shot.
+    const bumpedOut = discBodies.filter(d => d.alive && d.resting && !d.used);
+    for(const d of bumpedOut){
+      const p = d.body.position;
+      const inEnemyFree = (d.owner===1 && pointInRect(p.x,p.y,zr.p2Free)) ||
+                           (d.owner===0 && pointInRect(p.x,p.y,zr.p1Free));
+      if(inEnemyFree){
+        d.resting = false;
+        showToast(PLAYER_NAMES[d.owner] + " disc knocked into enemy territory!");
+        d.usesLeft -= 1;
+        if(d.usesLeft <= 0){
+          d.alive = false;
+          Composite.remove(world, d.body);
+          showToast(PLAYER_NAMES[d.owner] + " disc worn out");
+        } else {
+          returnDiscToFreeZone(d);
+        }
+      }
+    }
+
+    recalculateScores();
+
+    // win condition: a player who has no discs left in play (alive) loses
+    const p1Left = discBodies.some(d => d.owner===1 && d.alive);
+    const p2Left = discBodies.some(d => d.owner===0 && d.alive);
+    if(!p1Left || !p2Left){
+      declareWinner(!p1Left ? 0 : 1);
+      return;
+    }
+
+    currentPlayer = 1-currentPlayer;
+    if(availableDiscs(currentPlayer).length===0){
+      currentPlayer = 1-currentPlayer; // safety fallback, shouldn't trigger given the check above
+    }
+    updateTurnBanner();
+
+    // if any disc is still gliding home from this turn's reset(s), wait for it to finish
+    // before handing control to the next player — avoids a new shot overlapping the animation
+    const waitMs = resetTweens.length > 0 ? 450 : 0;
+
+    if(vsAI && currentPlayer===1 && availableDiscs(1).length>0){
+      setTimeout(aiTakeShot, 700 + waitMs);
+    }
+  }
+
+  // Live score = count of each player's discs CURRENTLY sitting inside their own drop
+  // zone right now (resting there specifically, not just parked somewhere on the board).
+  function recalculateScores(){
+    const zr = zoneRects();
+    let p1Score = 0, p2Score = 0;
+    for(const d of discBodies){
+      if(!d.alive || !d.resting) continue;
+      const p = d.body.position;
+      if(d.owner===1 && pointInRect(p.x,p.y,zr.p1Drop)) p1Score++;
+      if(d.owner===0 && pointInRect(p.x,p.y,zr.p2Drop)) p2Score++;
+    }
+    scores[1] = p1Score;
+    scores[0] = p2Score;
+    updateScoreChips();
+  }
+
+  function declareWinner(winnerIdx){
+    gameOver = true;
+    winTextEl.textContent = PLAYER_NAMES[winnerIdx] + ' wins';
+    winTextEl.style.color = playerColor(winnerIdx);
+    setTimeout(()=> winOverlayEl.classList.add('show'), 500);
+  }
+
+  // ---------------- Toast ----------------
+  let toastTimer = null;
+  function showToast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=> toastEl.classList.remove('show'), 1400);
+  }
+
+  function updateTurnBanner(){
+    const label = (vsAI && currentPlayer===1) ? PLAYER_NAMES[1]+' (bot)' : PLAYER_NAMES[currentPlayer];
+    turnBannerEl.textContent = label + "'s turn";
+    turnBannerEl.style.background = playerColor(currentPlayer) + '33';
+    turnBannerEl.style.color = playerColor(currentPlayer);
+    updateScoreChips();
+  }
+
+  // ---------------- Canvas sizing ----------------
+  function resizeCanvas(){
+    const wrap = boardWrapEl;
+    const availW = wrap.clientWidth - 16;
+    const availH = wrap.clientHeight - 16;
+    let w = availW, h = w / 0.58;
+    if(h > availH){ h = availH; w = h * 0.58; }
+    const newW = Math.max(260, w);
+    const newH = Math.max(440, h);
+
+    // skip if size didn't meaningfully change — avoids redundant rebuilds from
+    // mobile resize events firing on scroll-bounce, keyboard open/close, etc.
+    if(Math.abs(newW-boardW) < 1 && Math.abs(newH-boardH) < 1 && canvas.width > 0) return;
+
+    const prevW = boardW, prevH = boardH;
+    boardW = newW;
+    boardH = newH;
+
+    dpr = window.devicePixelRatio || 1;
+    canvas.width = boardW*dpr;
+    canvas.height = boardH*dpr;
+    canvas.style.width = boardW+'px';
+    canvas.style.height = boardH+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+
+    if(engine){
+      // Body.scale() corrupts circle vertices when called repeatedly, which can crash
+      // Matter's internals. Instead of scaling live bodies OR wiping the match, we
+      // recreate each disc's physics body at its proportionally-scaled new position and
+      // radius, but keep all of its game state (owner, usesLeft, resting, scores) —
+      // a resize should never reset an in-progress match.
+
+      // any disc mid-glide from a reset holds a reference to the body we're about to
+      // replace — snap it to its destination first so the tween resolves cleanly
+      // instead of animating a detached, removed body.
+      resetTweens.forEach(tw=>{
+        Body.setPosition(tw.disc.body, {x: tw.toX, y: tw.toY});
+        Body.setStatic(tw.disc.body, false);
+      });
+      resetTweens = [];
+
+      const sx = boardW/prevW, sy = boardH/prevH;
+      discBodies.forEach(d=>{
+        if(!d.alive) return;
+        const oldPos = d.body.position;
+        const newX = oldPos.x*sx, newY = oldPos.y*sy;
+        const newR = d.r*sx;
+        Composite.remove(world, d.body);
+        const newBody = Bodies.circle(newX, newY, newR, {
+          density: d.body.density,
+          frictionAir: d.body.frictionAir,
+          restitution: d.body.restitution,
+          friction: d.body.friction,
+          label: 'disc'
+        });
+        Composite.add(world, newBody);
+        d.body = newBody;
+        d.r = newR;
+        // homeRect is a zone rect captured at old board size — refresh it now that
+        // zoneRects() reflects the new boardW/boardH
+        const zr = zoneRects();
+        d.homeRect = d.owner===1 ? zr.p1Free : zr.p2Free;
+      });
+      buildWalls();
+    }
+  }
+  window.addEventListener('resize', ()=>{
+    if(boardWrapEl.style.display!=='none') resizeCanvas();
+  });
+
+  // ---------------- Rendering ----------------
+  function draw(){
+    const w = boardW, h = boardH;
+    ctx.clearRect(0,0,w,h);
+
+    const grad = ctx.createLinearGradient(0,0,0,h);
+    grad.addColorStop(0, '#1c1815');
+    grad.addColorStop(0.5, '#181410');
+    grad.addColorStop(1, '#1c1815');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,w,h);
+
+    ctx.strokeStyle = 'rgba(237,231,219,0.025)';
+    ctx.lineWidth = 1;
+    for(let x=8; x<w; x+=14){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+    }
+
+    const zr = zoneRects();
+    drawZone(zr.p2Free, COLORS.p2, 'FREE', false);
+    drawZone(zr.p1Drop, COLORS.p1, 'DROP', true);
+    drawZone(zr.p2Drop, COLORS.p2, 'DROP', true);
+    drawZone(zr.p1Free, COLORS.p1, 'FREE', false);
+
+    ctx.strokeStyle = 'rgba(237,231,219,0.15)';
+    ctx.setLineDash([4,6]);
+    ctx.beginPath();
+    ctx.moveTo(0, h/2); ctx.lineTo(w, h/2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.strokeStyle = 'rgba(237,231,219,0.3)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1,1,w-2,h-2);
+
+    if(!engine) return;
+
+    discBodies.forEach(d=>{
+      if(!d.alive) return;
+      const p = d.body.position;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,d.r,0,Math.PI*2);
+      ctx.fillStyle = playerColor(d.owner);
+      ctx.fill();
+
+      const isActive = d.owner===currentPlayer && !d.used && !d.resting && !animating;
+      ctx.lineWidth = d.cls==='heavy' ? 4 : d.cls==='medium' ? 2.5 : 1.5;
+      ctx.strokeStyle = d.resting ? '#f2d675' : (isActive ? '#ede7db' : 'rgba(0,0,0,0.4)');
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(p.x - d.r*0.3, p.y - d.r*0.3, d.r*0.32, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fill();
+
+      // small use-count pips along the bottom edge — shows lives remaining at a glance
+      const pipR = Math.max(1.5, d.r*0.09);
+      const pipGap = pipR*2.6;
+      const totalW = pipGap*(MAX_USES-1);
+      for(let i=0;i<MAX_USES;i++){
+        ctx.beginPath();
+        ctx.arc(p.x - totalW/2 + i*pipGap, p.y + d.r*0.62, pipR, 0, Math.PI*2);
+        ctx.fillStyle = i < d.usesLeft ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.45)';
+        ctx.fill();
+      }
+    });
+  }
+
+  function drawZone(rect, color, label, isDrop){
+    ctx.fillStyle = color + (isDrop ? '1c' : '10');
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.strokeStyle = color + '55';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash(isDrop ? [] : [3,5]);
+    ctx.strokeRect(rect.x+1, rect.y+1, rect.w-2, rect.h-2);
+    ctx.setLineDash([]);
+
+    ctx.font = '10px monospace';
+    ctx.fillStyle = color + '99';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, rect.x+rect.w/2, rect.y+rect.h/2+3);
+  }
+
+  // ---------------- Input: real swipe, driven by Matter body position ----------------
+  function getPointer(evt){
+    const rect = canvas.getBoundingClientRect();
+    const t = evt.touches ? evt.touches[0] : (evt.changedTouches ? evt.changedTouches[0] : evt);
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  }
+
+  function findMyDiscAt(pt){
+    const list = availableDiscs(currentPlayer);
+    let closest = -1, closestDist = 9999;
+    list.forEach(d=>{
+      const p = d.body.position;
+      const dist = Math.hypot(pt.x-p.x, pt.y-p.y);
+      if(dist < d.r*1.8 && dist < closestDist){
+        closest = discBodies.indexOf(d); closestDist = dist;
+      }
+    });
+    return closest;
+  }
+
+  function onDown(evt){
+    if(animating || gameOver || !engine || resetTweens.length>0) return;
+    if(vsAI && currentPlayer === 1) return;
+    evt.preventDefault();
+    const pt = getPointer(evt);
+    const idx = findMyDiscAt(pt);
+    if(idx<0) return;
+    dragging = true;
+    dragBodyIdx = idx;
+    const d = discBodies[idx];
+    Body.setStatic(d.body, false);
+    dragOffset = { x: pt.x - d.body.position.x, y: pt.y - d.body.position.y };
+    posHistory = [{x:pt.x, y:pt.y, t:performance.now()}];
+  }
+
+  function onMove(evt){
+    if(!dragging) return;
+    evt.preventDefault();
+    const pt = getPointer(evt);
+    const d = discBodies[dragBodyIdx];
+    const now = performance.now();
+    const dt = Math.max(1, now - (posHistory[posHistory.length-1]?.t || now));
+
+    const targetX = Math.max(d.r, Math.min(boardW-d.r, pt.x - dragOffset.x));
+    const targetY = Math.max(d.r, Math.min(boardH-d.r, pt.y - dragOffset.y));
+
+    // drive the body with velocity toward the pointer so Matter's own collision
+    // resolution (not hand-rolled math) handles anything it bumps into along the way
+    const vx = (targetX - d.body.position.x) / dt * 16.6;
+    const vy = (targetY - d.body.position.y) / dt * 16.6;
+    Body.setVelocity(d.body, { x: vx, y: vy });
+    Body.setPosition(d.body, { x: targetX, y: targetY });
+
+    posHistory.push({x:pt.x, y:pt.y, t:now});
+    posHistory = posHistory.filter(p => now-p.t < 100);
+  }
+
+  function onUp(evt){
+    if(!dragging) return;
+    dragging = false;
+    const d = discBodies[dragBodyIdx];
+    const now = performance.now();
+    const recent = posHistory.filter(p => now-p.t < 90);
+
+    let vx=0, vy=0;
+    if(recent.length>=2){
+      const first = recent[0], last = recent[recent.length-1];
+      const dt = Math.max(1, last.t-first.t);
+      let rawVx = (last.x-first.x)/dt;
+      let rawVy = (last.y-first.y)/dt;
+      const speed = Math.hypot(rawVx,rawVy);
+      if(speed > MAX_SWIPE_PXMS){
+        const s = MAX_SWIPE_PXMS/speed;
+        rawVx*=s; rawVy*=s;
+      }
+      vx = rawVx; vy = rawVy;
+    }
+
+    posHistory = [];
+    dragBodyIdx = -1;
+
+    const speed = Math.hypot(vx,vy);
+    if(speed < 0.12){
+      snapDiscBack(d);
+      return;
+    }
+
+    // Carry your hand's velocity directly into the disc's launch velocity — no reset to
+    // zero and no separate force impulse, so there's no stutter at hand-off. Weight still
+    // matters here: the same swipe speed imparts less velocity to a heavy disc than a
+    // light one (harder to get a heavy puck moving with your hand), scaled against the
+    // medium class as a neutral baseline. From there, only Matter's own physics
+    // (frictionAir per size/weight, restitution on collisions/walls) slows it down —
+    // heavier discs carry more momentum through contact once moving, lighter ones scrub
+    // off speed faster from air friction, exactly like the drag itself felt.
+    const massFactor = MEDIUM_MASS_REF / d.body.mass;
+    Body.setVelocity(d.body, { x: vx*16.6*massFactor, y: vy*16.6*massFactor });
+    d.used = true;
+    animating = true;
+  }
+
+  function snapDiscBack(d){
+    const zr = zoneRects();
+    const homeRect = d.owner===1 ? zr.p1Free : zr.p2Free;
+    Body.setVelocity(d.body, {x:0,y:0});
+    Body.setPosition(d.body, {
+      x: Math.max(d.r, Math.min(boardW-d.r, d.body.position.x)),
+      y: homeRect.y + homeRect.h/2
+    });
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, {passive:false});
+  canvas.addEventListener('touchmove', onMove, {passive:false});
+  canvas.addEventListener('touchend', onUp, {passive:false});
+
+  // ---------------- Simple AI ----------------
+  function aiTakeShot(){
+    if(gameOver) return;
+    const list = availableDiscs(1);
+    if(list.length===0) return;
+    const d = list[0];
+    const zr = zoneRects();
+    const target = zr.p2Drop;
+    const targetX = target.x + target.w * (0.3 + Math.random()*0.4);
+    const targetY = target.y + target.h * (0.35 + Math.random()*0.3);
+
+    const p = d.body.position;
+    const dx = targetX - p.x, dy = targetY - p.y;
+    const dist = Math.hypot(dx,dy);
+    const ang = Math.atan2(dy,dx);
+    const speed = Math.min(dist*0.012 + Math.random()*0.3, MAX_SWIPE_PXMS);
+    const vx = Math.cos(ang)*speed, vy = Math.sin(ang)*speed;
+
+    const massFactor = MEDIUM_MASS_REF / d.body.mass;
+    Body.setVelocity(d.body, { x: vx*16.6*massFactor, y: vy*16.6*massFactor });
+    d.used = true;
+    animating = true;
+  }
+
+  // ---------------- Main loop ----------------
+  let lastTime = performance.now();
+  function loop(now){
+    const delta = Math.min(33, now - lastTime || 16.6);
+    lastTime = now;
+
+    if(engine){
+      updateResetTweens(now);
+      if(animating){
+        stepEngine(delta);
+        if(!isMoving()){
+          animating = false;
+          settleScoring();
+        }
+      } else if(dragging){
+        // still step the world so other discs that got bumped keep settling/friction-ing
+        stepEngine(delta);
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+})();
+</script>
+</body>
+</html>

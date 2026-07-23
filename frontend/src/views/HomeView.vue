@@ -46,7 +46,7 @@ async function handleLogout() {
           <span class="ludo-pic-hub" />
         </span>
         <strong>Ludo</strong>
-        <span class="text-muted">منچ</span>
+
       </button>
 
       <button class="game-tile" @click="chooseGame('snakes_ladders')">
@@ -59,7 +59,7 @@ async function handleLogout() {
           />
         </span>
         <strong>Snakes &amp; Ladders</strong>
-        <span class="text-muted">ماروپله</span>
+
       </button>
     </div>
   </div>

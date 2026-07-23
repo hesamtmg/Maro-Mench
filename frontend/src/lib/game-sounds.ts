@@ -98,3 +98,71 @@ export function playStairs() {
   const steps = [392, 440, 494, 523.25, 587.33]; // G4 A4 B4 C5 D5
   steps.forEach((freq, i) => tone(ctx, freq, t0 + i * 0.07, 0.12, 'square', 0.15));
 }
+
+/** Short burst of filtered noise, shaped with a fast decay -- an impact. */
+function noiseBurst(
+  ctx: AudioContext,
+  startTime: number,
+  duration: number,
+  peakGain: number,
+  filterFreq: number,
+) {
+  const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * duration));
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  }
+
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(filterFreq, startTime);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(peakGain, startTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+  noise.connect(filter).connect(gain).connect(ctx.destination);
+  noise.start(startTime);
+  noise.stop(startTime + duration + 0.02);
+}
+
+/** Crash/impact -- one token sent another home. */
+export function playCrash() {
+  const ctx = getContext();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+
+  // Low thud underneath the noise for weight/impact.
+  const osc = ctx.createOscillator();
+  const oscGain = ctx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(140, t0);
+  osc.frequency.exponentialRampToValueAtTime(40, t0 + 0.25);
+  oscGain.gain.setValueAtTime(0.35, t0);
+  oscGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
+  osc.connect(oscGain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.32);
+
+  noiseBurst(ctx, t0, 0.28, 0.35, 1400);
+}
+
+/** Bigger, longer fanfare -- for the actual game-winning moment, distinct
+ * from the quick playHooray() used for smaller good-news events. */
+export function playVictoryFanfare() {
+  const ctx = getContext();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+
+  const run = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5]; // C5 D5 E5 G5 A5 C6
+  run.forEach((freq, i) => tone(ctx, freq, t0 + i * 0.09, 0.16, 'triangle', 0.2));
+
+  const chordStart = t0 + run.length * 0.09 + 0.05;
+  [523.25, 659.25, 783.99, 1046.5].forEach((freq) =>
+    tone(ctx, freq, chordStart, 0.6, 'sawtooth', 0.16),
+  );
+}

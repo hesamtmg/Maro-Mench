@@ -14,6 +14,10 @@ const props = defineProps<{
   boardState: SnakesLaddersState;
   players: RoomPlayer[];
   currentTurnSeat?: number | null;
+  // Set when the page itself renders an equivalent player-status panel
+  // elsewhere (e.g. RoomView's sidebar on wide screens), so it isn't
+  // shown twice.
+  hidePlayerSummary?: boolean;
 }>();
 
 const BOARD_SIZE = 100;
@@ -427,7 +431,7 @@ const ladderShapes = computed(() => {
     </div>
     </div>
 
-    <div class="stack">
+    <div v-if="!hidePlayerSummary" class="stack">
       <div
         v-for="player in props.players"
         :key="player.userId"

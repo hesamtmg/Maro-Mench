@@ -238,8 +238,8 @@ onUnmounted(() => {
       <div class="row">
         <select v-model="publicRoomsGameFilter" @change="loadPublicRooms">
           <option value="">All games</option>
-          <option value="ludo">Ludo (منچ)</option>
-          <option value="snakes_ladders">Snakes &amp; Ladders (ماروپله)</option>
+          <option value="ludo">Ludo </option>
+          <option value="snakes_ladders">Snakes &amp; Ladders</option>
         </select>
         <button class="btn btn-secondary" @click="loadPublicRooms">
           Refresh
@@ -284,9 +284,9 @@ onUnmounted(() => {
         <div class="form-group">
           <label for="createGameType">Game</label>
           <select id="createGameType" v-model="createGameType">
-            <option value="ludo">Ludo (منچ)</option>
+            <option value="ludo">Ludo </option>
             <option value="snakes_ladders">
-              Snakes &amp; Ladders (ماروپله)
+              Snakes &amp; Ladders 
             </option>
           </select>
         </div>
@@ -353,8 +353,8 @@ onUnmounted(() => {
       <div class="form-group">
         <label for="queueGameType">Game</label>
         <select id="queueGameType" v-model="queueGameType" :disabled="isQueued">
-          <option value="ludo">Ludo (منچ)</option>
-          <option value="snakes_ladders">Snakes &amp; Ladders (ماروپله)</option>
+          <option value="ludo">Ludo </option>
+          <option value="snakes_ladders">Snakes &amp; Ladders </option>
         </select>
       </div>
 

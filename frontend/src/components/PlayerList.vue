@@ -70,5 +70,9 @@ function statusLabel(status: RoomPlayer['status']): string {
   height: 12px;
   border-radius: 50%;
   display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow:
+    inset 0 -2px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5);
 }
 </style>

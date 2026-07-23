@@ -12,6 +12,7 @@ interface SnakesLaddersState {
   snakes: Record<number, number>;
   ladders: Record<number, number>;
   finishedOrder: number[]; // seatIndex order in which players finished
+  consecutiveSixes: Record<number, number>; // seatIndex -> count this turn-chain
 }
 
 function rollDie(): number {
@@ -25,8 +26,10 @@ export class SnakesLaddersEngine implements GameEngine {
     rules: Record<string, unknown>,
   ): Record<string, unknown> {
     const positions: Record<number, number> = {};
+    const consecutiveSixes: Record<number, number> = {};
     for (const seat of seats) {
       positions[seat.seatIndex] = 0;
+      consecutiveSixes[seat.seatIndex] = 0;
     }
 
     const useCustomBoard = rules?.customBoard as
@@ -38,6 +41,7 @@ export class SnakesLaddersEngine implements GameEngine {
       snakes: useCustomBoard?.snakes ?? DEFAULT_SNAKES,
       ladders: useCustomBoard?.ladders ?? DEFAULT_LADDERS,
       finishedOrder: [],
+      consecutiveSixes,
     };
 
     return state as unknown as Record<string, unknown>;
@@ -50,13 +54,32 @@ export class SnakesLaddersEngine implements GameEngine {
   ): RollResult {
     const diceValue = rollDie();
     const state = boardState as unknown as SnakesLaddersState;
+    // Backfill for games already in progress when this field was added --
+    // their persisted boardState predates it and won't have it otherwise.
+    if (!state.consecutiveSixes) {
+      state.consecutiveSixes = {};
+    }
 
     const currentPos = state.positions[seatIndex] ?? 0;
-    let newPos = currentPos + diceValue;
+    let newPos = currentPos;
+    let noLegalMove = false;
 
-    // Must land exactly on the final square; overshoot means no move.
-    if (newPos > BOARD_SIZE) {
-      newPos = currentPos;
+    if (currentPos === 0) {
+      // Checkpoint rule: a token stays home until its owner rolls a six.
+      // That same six is also the move -- it lands exactly on square 6,
+      // not "6 plus whatever square 0 would imply".
+      if (diceValue === 6) {
+        newPos = 6;
+      } else {
+        noLegalMove = true;
+      }
+    } else {
+      newPos = currentPos + diceValue;
+      // Must land exactly on the final square; overshoot means no move.
+      if (newPos > BOARD_SIZE) {
+        newPos = currentPos;
+        noLegalMove = true;
+      }
     }
 
     let landedOnSnakeOrLadder = false;
@@ -83,7 +106,15 @@ export class SnakesLaddersEngine implements GameEngine {
     );
     const isGameOver = activeSeats.length <= 1 && seats.length > 1;
 
-    const nextTurnSeat = this.getNextSeat(seats, seatIndex, newState);
+    // Reward rule: rolling a six earns another roll, same as Ludo --
+    // capped at two extra rolls in a row so a lucky streak can't hog the
+    // game forever.
+    const nextTurnSeat = this.getNextSeat(
+      seats,
+      seatIndex,
+      diceValue,
+      newState,
+    );
 
     return {
       diceValue,
@@ -98,6 +129,7 @@ export class SnakesLaddersEngine implements GameEngine {
           rolled: diceValue,
           to: newPos,
           landedOnSnakeOrLadder,
+          noLegalMove,
         },
       },
     };
@@ -127,8 +159,19 @@ export class SnakesLaddersEngine implements GameEngine {
   private getNextSeat(
     seats: RoomPlayerSeat[],
     currentSeatIndex: number,
+    diceValue: number,
     state: SnakesLaddersState,
   ): number {
+    if (diceValue === 6) {
+      const chain = state.consecutiveSixes[currentSeatIndex] ?? 0;
+      if (chain < 2) {
+        state.consecutiveSixes[currentSeatIndex] = chain + 1;
+        return currentSeatIndex;
+      }
+      // Chain cap hit -- fall through to advancing the turn below.
+    }
+    state.consecutiveSixes[currentSeatIndex] = 0;
+
     const sortedSeats = [...seats].sort((a, b) => a.seatIndex - b.seatIndex);
     const activeSeats = sortedSeats.filter(
       (s) => !state.finishedOrder.includes(s.seatIndex),

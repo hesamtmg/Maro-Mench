@@ -30,6 +30,12 @@ const router = createRouter({
     },
     {
       path: '/',
+      name: 'home',
+      component: () => import('../views/HomeView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/lobby',
       name: 'lobby',
       component: () => import('../views/LobbyView.vue'),
       meta: { requiresAuth: true },
@@ -51,7 +57,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
   if (to.meta.guestOnly && authStore.isAuthenticated) {
-    return { name: 'lobby' };
+    return { name: 'home' };
   }
   return true;
 });

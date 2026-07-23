@@ -7,6 +7,7 @@ export const WS_EVENTS_IN = {
   ROLL_DICE: 'roll_dice', // { roomId }
   MAKE_MOVE: 'make_move', // { roomId, tokenId }  (Ludo only, when choice needed)
   KICK_PLAYER: 'kick_player', // { roomId, targetUserId } (admin only)
+  DELETE_ROOM: 'delete_room', // { roomId } (admin only)
   JOIN_QUEUE: 'join_queue', // { gameTypeCode, rulesJson? }
   CANCEL_QUEUE: 'cancel_queue', // {}
 } as const;
@@ -18,6 +19,7 @@ export const WS_EVENTS_OUT = {
   PLAYER_JOINED: 'player_joined',
   PLAYER_LEFT: 'player_left',
   PLAYER_KICKED: 'player_kicked',
+  ROOM_DELETED: 'room_deleted', // { roomId } -- room admin deleted the room
   PLAYER_DISCONNECTED: 'player_disconnected',
   PLAYER_RECONNECTED: 'player_reconnected',
   GAME_STARTED: 'game_started', // initial board_state

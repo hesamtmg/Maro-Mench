@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { roomsApi } from '../api/rooms.api';
 import DiceRoller from '../components/DiceRoller.vue';
@@ -21,6 +21,24 @@ const { myPlayer, isAdmin, isMyTurn } = useMySeat();
 
 const isLoading = ref(true);
 const loadError = ref('');
+
+// Ticks while a game is in progress so secondsLeft below stays live;
+// cheap enough at 4Hz and only running while there's a deadline to show.
+const now = ref(Date.now());
+let clockHandle: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  clockHandle = setInterval(() => {
+    now.value = Date.now();
+  }, 250);
+});
+onUnmounted(() => {
+  if (clockHandle) clearInterval(clockHandle);
+});
+
+const secondsLeft = computed(() => {
+  if (roomStore.turnDeadline == null) return null;
+  return Math.max(0, Math.ceil((roomStore.turnDeadline - now.value) / 1000));
+});
 
 async function initRoom() {
   isLoading.value = true;
@@ -58,6 +76,31 @@ function handleKick(userId: string) {
   roomStore.kickPlayer(props.id, userId);
 }
 
+function handleDeleteRoom() {
+  if (
+    !window.confirm(
+      'Delete this room? Everyone will be removed and this cannot be undone.',
+    )
+  ) {
+    return;
+  }
+  roomStore.deleteRoom(props.id);
+}
+
+// Fires whenever the room disappears out from under us -- deleted by the
+// admin, or (for the room's own admin) the delete they just triggered --
+// and sends everyone back to the lobby. Also fires for a normal
+// handleLeaveRoom(), where the push below is a harmless no-op since
+// we're already mid-navigation to the same route.
+watch(
+  () => roomStore.room,
+  (room, previousRoom) => {
+    if (previousRoom && !room) {
+      void router.push({ name: 'lobby' }).catch(() => {});
+    }
+  },
+);
+
 function handleCopyCode() {
   const code = roomStore.room?.code;
   if (!code) return;
@@ -86,6 +129,15 @@ const winnerName = computed(() => {
   );
 });
 
+// Gates showing turn/dice info in the header -- only once a game is
+// actually underway (not waiting, not already finished).
+const showTurnInfo = computed(
+  () =>
+    roomStore.room?.status === 'in_progress' &&
+    !!roomStore.boardState &&
+    !winnerName.value,
+);
+
 const canStartGame = computed(() => {
   const room = roomStore.room;
   if (!room || !isAdmin.value) return false;
@@ -108,9 +160,9 @@ onMounted(() => {
     </p>
 
     <template v-else-if="roomStore.room">
-      <div class="row-between" style="margin-bottom: 1.5rem">
-        <div>
-          <h1>{{ roomStore.room.gameType.name }}</h1>
+      <div class="game-header">
+        <div class="header-title">
+          <h1 class="game-title">{{ roomStore.room.gameType.name }}</h1>
           <button
             v-if="roomStore.room.code"
             class="code-chip"
@@ -120,9 +172,60 @@ onMounted(() => {
             Code: <strong>{{ roomStore.room.code }}</strong> 📋
           </button>
         </div>
-        <button class="btn btn-secondary" @click="handleLeaveRoom">
-          Leave room
-        </button>
+
+        <div class="header-actions">
+          <div v-if="showTurnInfo" class="turn-pill">
+            <span>
+              <strong v-if="isMyTurn" class="turn-badge turn-badge-mine"
+                >Your turn!</strong
+              >
+              <span v-else class="turn-badge">
+                {{
+                  roomStore.room.players.find(
+                    (p) => p.seatIndex === roomStore.currentTurnSeat,
+                  )?.displayName ?? 'Other player'
+                }}'s turn…
+              </span>
+              <span
+                v-if="secondsLeft !== null"
+                class="turn-timer"
+                :class="{ 'turn-timer-urgent': secondsLeft <= 10 }"
+              >
+                ⏱ {{ secondsLeft }}s
+              </span>
+            </span>
+
+            <span class="turn-divider" />
+
+            <DiceRoller
+              :value="roomStore.lastDiceValue"
+              :is-rolling="roomStore.isRolling"
+            />
+            <button
+              v-if="isMyTurn && !roomStore.awaitingMoveChoice"
+              class="btn btn-primary"
+              :disabled="roomStore.isRolling"
+              @click="handleRollDice"
+            >
+              {{ roomStore.isRolling ? 'Rolling…' : 'Roll dice' }}
+            </button>
+          </div>
+
+          <button
+            v-if="isAdmin"
+            class="btn btn-danger delete-room-btn"
+            @click="handleDeleteRoom"
+          >
+            Delete room
+          </button>
+
+          <button
+            class="btn btn-secondary leave-btn"
+            @click="handleLeaveRoom"
+          >
+            Leave room
+          </button>
+        </div>
       </div>
 
       <!-- Waiting room -->
@@ -166,35 +269,6 @@ onMounted(() => {
 
       <!-- In-progress game -->
       <div v-else-if="roomStore.boardState" class="stack">
-        <div class="row-between card">
-          <div>
-            <strong v-if="isMyTurn" class="turn-badge turn-badge-mine"
-              >Your turn!</strong
-            >
-            <span v-else class="turn-badge">
-              {{
-                roomStore.room.players.find(
-                  (p) => p.seatIndex === roomStore.currentTurnSeat,
-                )?.displayName ?? 'Other player'
-              }}'s turn…
-            </span>
-          </div>
-          <div class="row">
-            <DiceRoller
-              :value="roomStore.lastDiceValue"
-              :is-rolling="roomStore.isRolling"
-            />
-            <button
-              v-if="isMyTurn && !roomStore.awaitingMoveChoice"
-              class="btn btn-primary"
-              :disabled="roomStore.isRolling"
-              @click="handleRollDice"
-            >
-              {{ roomStore.isRolling ? 'Rolling…' : 'Roll dice' }}
-            </button>
-          </div>
-        </div>
-
         <LudoBoard
           v-if="gameTypeCode === 'ludo'"
           :board-state="roomStore.boardState as any"
@@ -203,6 +277,8 @@ onMounted(() => {
           :awaiting-move-choice="roomStore.awaitingMoveChoice"
           :my-tokens="myLudoTokens"
           :current-turn-seat="roomStore.currentTurnSeat"
+          :my-seat-index="myPlayer?.seatIndex ?? null"
+          :dice-value="roomStore.awaitingDiceValue"
           @select-token="handleSelectToken"
         />
         <SnakesLaddersBoard
@@ -211,12 +287,175 @@ onMounted(() => {
           :players="roomStore.room.players"
           :current-turn-seat="roomStore.currentTurnSeat"
         />
+
+        <!-- Activity log: newest event on top, oldest fading out at the
+             bottom of the scrollable window rather than cutting off
+             abruptly. -->
+        <div v-if="roomStore.eventLog.length" class="event-log card">
+          <h4 class="event-log-title">Activity</h4>
+          <ul class="event-log-list">
+            <li v-for="entry in roomStore.eventLog" :key="entry.id">
+              {{ entry.message }}
+            </li>
+          </ul>
+        </div>
       </div>
     </template>
+
+    <!-- Brief full-screen reaction to big events (a capture, a snake, a
+         ladder, game over) -- purely decorative (position: fixed, so its
+         place in the DOM doesn't matter), clears itself a moment after
+         roomStore sets it. -->
+    <Transition name="celebrate">
+      <div
+        v-if="roomStore.celebration"
+        class="celebration-overlay"
+        :class="roomStore.celebration"
+      >
+        <span class="celebration-emoji">{{
+          roomStore.celebration === 'victory' ? '🎉' : '😬'
+        }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
+/* Compact header combining the room title/code, the current turn +
+   dice/roll controls, and the leave button in one bar -- instead of a
+   full-size <h1> plus a separate turn-status card taking up its own row. */
+.game-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1.25rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.header-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 0.15rem;
+}
+
+.game-title {
+  font-size: 1.35rem;
+  margin: 0;
+}
+
+/* One cohesive chip for turn status + dice + roll button, rather than
+   two separately-aligned rows -- reads as a single unit instead of
+   scattered controls. */
+.turn-pill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+}
+
+.turn-divider {
+  width: 1px;
+  height: 1.4rem;
+  background: var(--color-border);
+}
+
+.turn-pill .btn {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+/* Groups the turn/dice pill and the leave button together on the same
+   row, on the opposite side of the header from the title -- and, once
+   stacked on mobile, keeps the leave button riding along next to the
+   dice pill instead of dropping to its own separate row below. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Below this, the header's pieces no longer fit on one line comfortably
+   -- stack them and let each take the full width instead of squeezing
+   together. */
+@media (max-width: 640px) {
+  .game-header {
+    flex-direction: column;
+    align-items: stretch;
+    /* Pinned to the top of the viewport on mobile so the turn/dice/leave
+       controls stay reachable while scrolling down to the board or the
+       activity log below. */
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    margin-left: -1.25rem;
+    margin-right: -1.25rem;
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+    padding-top: 0.75rem;
+    background: var(--color-bg);
+    background-image: var(--color-bg-gradient);
+  }
+
+  .header-actions {
+    justify-content: space-between;
+  }
+
+  .turn-pill {
+    border-radius: var(--radius);
+    justify-content: space-between;
+  }
+
+  .leave-btn,
+  .delete-room-btn {
+    padding: 0.45rem 1rem;
+    font-size: 0.85rem;
+  }
+}
+
+.event-log {
+  margin-top: 0.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.event-log-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.event-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 1rem;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  /* Fades the bottom of the visible window so the list reads as
+     "continues below", rather than looking like it cuts off abruptly. */
+  mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 70%,
+    transparent 100%
+  );
+}
+
 .code-chip {
   background: none;
   border: none;
@@ -238,5 +477,95 @@ onMounted(() => {
 .turn-badge-mine {
   color: var(--color-primary);
   font-size: 1.1rem;
+}
+
+.turn-timer {
+  margin-left: 0.75rem;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.turn-timer-urgent {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.celebration-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 200;
+}
+
+.celebration-emoji {
+  font-size: 5rem;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.45));
+}
+
+.celebration-overlay.victory .celebration-emoji {
+  animation: celebration-victory 1.1s ease-out;
+}
+
+.celebration-overlay.failure .celebration-emoji {
+  animation: celebration-failure 0.7s ease-in-out;
+}
+
+@keyframes celebration-victory {
+  0% {
+    transform: scale(0.2) rotate(-15deg);
+    opacity: 0;
+  }
+  35% {
+    transform: scale(1.3) rotate(10deg);
+    opacity: 1;
+  }
+  65% {
+    transform: scale(0.95) rotate(-5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0;
+  }
+}
+
+@keyframes celebration-failure {
+  0% {
+    transform: translateX(0) rotate(0);
+    opacity: 1;
+  }
+  20% {
+    transform: translateX(-14px) rotate(-8deg);
+  }
+  40% {
+    transform: translateX(10px) rotate(6deg);
+  }
+  60% {
+    transform: translateX(-8px) rotate(-4deg);
+  }
+  80% {
+    transform: translateX(6px) rotate(3deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) rotate(0);
+    opacity: 0;
+  }
+}
+
+.celebrate-enter-active {
+  transition: opacity 0.1s ease;
+}
+
+.celebrate-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.celebrate-enter-from,
+.celebrate-leave-to {
+  opacity: 0;
 }
 </style>

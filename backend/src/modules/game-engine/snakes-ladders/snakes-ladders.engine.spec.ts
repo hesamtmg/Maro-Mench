@@ -85,12 +85,58 @@ describe('SnakesLaddersEngine', () => {
 
     it('sends a token up a ladder', () => {
       const state = engine.createInitialState(seats, {}) as any;
-      // Ladder at 4 -> 14 in default board.
-      state.positions[0] = 0;
-      jest.spyOn(Math, 'random').mockReturnValue((4 - 1) / 6); // roll of 4 -> 0+4=4
+      // Ladder at 9 -> 31 in default board. Token is already off the
+      // checkpoint, so a plain roll of 4 lands exactly on it.
+      state.positions[0] = 5;
+      jest.spyOn(Math, 'random').mockReturnValue((4 - 1) / 6); // roll of 4 -> 5+4=9
       const result = engine.rollDice(state, seats, 0);
-      expect(result.moveResult?.movePayload.to).toBe(DEFAULT_LADDERS[4]);
+      expect(result.moveResult?.movePayload.to).toBe(DEFAULT_LADDERS[9]);
       expect(result.moveResult?.movePayload.landedOnSnakeOrLadder).toBe(true);
+    });
+  });
+
+  describe('checkpoint rule (must roll a six to leave home)', () => {
+    it('stays at home on a non-six roll', () => {
+      const state = engine.createInitialState(seats, {}) as any;
+      jest.spyOn(Math, 'random').mockReturnValue(0.0); // roll of 1
+      const result = engine.rollDice(state, seats, 0);
+      expect(result.moveResult?.movePayload.to).toBe(0);
+      expect(result.moveResult?.movePayload.noLegalMove).toBe(true);
+    });
+
+    it('enters the board on a six, landing exactly on square 6', () => {
+      const state = engine.createInitialState(seats, {}) as any;
+      jest.spyOn(Math, 'random').mockReturnValue((6 - 1) / 6); // roll of 6
+      const result = engine.rollDice(state, seats, 0);
+      expect(result.moveResult?.movePayload.to).toBe(6);
+      expect(result.moveResult?.movePayload.noLegalMove).toBe(false);
+    });
+  });
+
+  describe('reward rule (a six earns another roll)', () => {
+    it('gives the same seat another turn after rolling a six', () => {
+      const state = engine.createInitialState(seats, {}) as any;
+      state.positions[0] = 10;
+      jest.spyOn(Math, 'random').mockReturnValue((6 - 1) / 6); // roll of 6
+      const result = engine.rollDice(state, seats, 0);
+      expect(result.moveResult?.nextTurnSeat).toBe(0);
+    });
+
+    it('caps extra turns at two consecutive sixes', () => {
+      const state = engine.createInitialState(seats, {}) as any;
+      state.positions[0] = 10;
+      jest.spyOn(Math, 'random').mockReturnValue((6 - 1) / 6); // always roll 6
+
+      const first = engine.rollDice(state, seats, 0);
+      Object.assign(state, first.moveResult?.boardState);
+      expect(first.moveResult?.nextTurnSeat).toBe(0);
+
+      const second = engine.rollDice(state, seats, 0);
+      Object.assign(state, second.moveResult?.boardState);
+      expect(second.moveResult?.nextTurnSeat).toBe(0);
+
+      const third = engine.rollDice(state, seats, 0);
+      expect(third.moveResult?.nextTurnSeat).toBe(1);
     });
   });
 

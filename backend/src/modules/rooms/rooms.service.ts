@@ -15,6 +15,25 @@ import { generateRoomCode } from './utils/room-code.util';
 
 const LUDO_COLORS = ['red', 'green', 'yellow', 'blue'];
 
+// Per-seat color for game types other than Ludo (which has its own fixed
+// four-color convention above). This is a qualitative palette (hues
+// spread around the color wheel, not just "different shades of the same
+// family") chosen so each seat stays visually distinguishable from every
+// other, even when several are on screen at once. Cycled via
+// seatIndex % length so larger rooms (e.g. snakes_ladders, up to 16
+// players) still get a color per player rather than repeating too
+// quickly.
+const DEFAULT_SEAT_COLORS = [
+  '#e15759', // red
+  '#4e79a7', // blue
+  '#59a14f', // green
+  '#f0b429', // gold
+  '#b07aa1', // purple
+  '#f28e2b', // orange
+  '#17becf', // teal
+  '#ff6fae', // pink
+];
+
 export interface CreateRoomParams {
   gameTypeCode: GameTypeCode;
   visibility: RoomVisibility.PRIVATE | RoomVisibility.PUBLIC;
@@ -57,10 +76,11 @@ export class RoomsService {
       status: RoomStatus.WAITING,
       maxPlayers: params.maxPlayers,
       rulesJson: params.rulesJson ?? {},
-      code:
-        params.visibility === RoomVisibility.PRIVATE
-          ? await this.generateUniqueCode()
-          : null,
+      // Every room gets a shareable code, not just private ones -- it's
+      // the easiest way for friends to find and land in the *same*
+      // public room together, rather than joining whichever public room
+      // happens to be first in the list.
+      code: await this.generateUniqueCode(),
     });
     const savedRoom = await this.roomRepository.save(room);
 
@@ -97,6 +117,24 @@ export class RoomsService {
   }
 
   private async joinRoom(room: Room, userId: string): Promise<Room> {
+    // A player who's already seated (including mid-game, via a disconnect
+    // or a "leave" while in progress -- see onLeaveRoom in game.gateway.ts)
+    // must be able to get back in no matter the room's status; only a
+    // stranger needs the room to still be WAITING. The actual JOINED
+    // restoration + PLAYER_RECONNECTED broadcast happens in the game
+    // gateway's JOIN_ROOM socket handler right after this.
+    const existingPlayer = room.players.find((p) => p.userId === userId);
+    const isReturningMember =
+      existingPlayer &&
+      [
+        RoomPlayerStatus.JOINED,
+        RoomPlayerStatus.READY,
+        RoomPlayerStatus.DISCONNECTED,
+      ].includes(existingPlayer.status);
+    if (isReturningMember) {
+      return this.findRoomOrThrow(room.id);
+    }
+
     if (room.status !== RoomStatus.WAITING) {
       throw new ConflictException('Room is not accepting new players');
     }
@@ -104,11 +142,6 @@ export class RoomsService {
     const activePlayers = room.players.filter((p) =>
       [RoomPlayerStatus.JOINED, RoomPlayerStatus.READY].includes(p.status),
     );
-
-    const alreadyIn = activePlayers.find((p) => p.userId === userId);
-    if (alreadyIn) {
-      return this.findRoomOrThrow(room.id);
-    }
 
     if (activePlayers.length >= room.maxPlayers) {
       throw new ConflictException('Room is full');
@@ -132,7 +165,9 @@ export class RoomsService {
     while (takenSeats.has(seatIndex)) seatIndex++;
 
     const isLudo = gameTypeCode === GameTypeCode.LUDO;
-    const color = isLudo ? LUDO_COLORS[seatIndex] : null;
+    const color = isLudo
+      ? LUDO_COLORS[seatIndex]
+      : DEFAULT_SEAT_COLORS[seatIndex % DEFAULT_SEAT_COLORS.length];
 
     const player = this.roomPlayerRepository.create({
       roomId: room.id,
@@ -204,6 +239,23 @@ export class RoomsService {
   }
 
   /**
+   * Deletes a room outright (admin only). RoomPlayer/GameState/GameMove
+   * rows all have an ON DELETE CASCADE FK to rooms, so a single delete
+   * here cleans up everything -- no manual child-row removal needed.
+   */
+  async deleteRoom(roomId: string, requestingUserId: string): Promise<Room> {
+    const room = await this.findRoomOrThrow(roomId);
+
+    const requester = room.players.find((p) => p.userId === requestingUserId);
+    if (!requester?.isAdmin) {
+      throw new ForbiddenException('Only the room admin can delete the room');
+    }
+
+    await this.roomRepository.delete({ id: roomId });
+    return room;
+  }
+
+  /**
    * Converts a freshly-created room into a matchmaking room: strips
    * admin rights from every seat (matchmaking rooms have no kick power)
    * and clears createdBy since it's system-formed, not user-created.
@@ -235,7 +287,14 @@ export class RoomsService {
       .where('room.visibility = :visibility', {
         visibility: RoomVisibility.PUBLIC,
       })
-      .andWhere('room.status = :status', { status: RoomStatus.WAITING })
+      // Include in-progress rooms too, not just WAITING ones -- otherwise
+      // a player who left (or disconnected) mid-game has no way to find
+      // their way back to it without already having the room code saved.
+      // Strangers can still see it, but joinRoom() only lets an existing
+      // member actually back into a non-WAITING room.
+      .andWhere('room.status IN (:...statuses)', {
+        statuses: [RoomStatus.WAITING, RoomStatus.IN_PROGRESS],
+      })
       .orderBy('room.createdAt', 'DESC')
       .skip((page - 1) * pageSize)
       .take(pageSize);

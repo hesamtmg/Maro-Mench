@@ -110,12 +110,13 @@ describe('RoomsService', () => {
       );
     });
 
-    it('does not generate a code for public rooms', async () => {
+    it('also generates an invite code for public rooms, so friends can find the same room', async () => {
+      roomRepo.findOne.mockResolvedValueOnce(null); // uniqueness check passes
       roomRepo.findOne.mockResolvedValueOnce({
         id: 'room-1',
         gameType: LUDO_GAME_TYPE,
         players: [],
-      });
+      }); // findRoomOrThrow at the end
 
       await service.createRoom({
         gameTypeCode: GameTypeCode.LUDO,
@@ -125,7 +126,9 @@ describe('RoomsService', () => {
       });
 
       const savedRoomCall = roomRepo.save.mock.calls[0][0];
-      expect(savedRoomCall.code).toBeNull();
+      expect(savedRoomCall.code).toEqual(
+        expect.stringMatching(/^[A-Z2-9]{6}$/),
+      );
     });
 
     it('auto-joins the creator as seat 0 with admin rights', async () => {

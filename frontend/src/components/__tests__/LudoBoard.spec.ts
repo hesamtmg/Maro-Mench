@@ -29,6 +29,20 @@ function trackCellAt(wrapper: ReturnType<typeof mount>, row: number, col: number
     );
 }
 
+// Tokens on the track live in their own overlay layer (.tokens-layer),
+// positioned via their own gridRow/gridColumn inline style, rather than
+// being nested inside their .track-cell -- that flat structure is what
+// lets <TransitionGroup> animate a token sliding between cells.
+function tokensAt(wrapper: ReturnType<typeof mount>, row: number, col: number) {
+  return wrapper
+    .findAll('.track-token')
+    .filter(
+      (el) =>
+        el.attributes('style')?.includes(`grid-row: ${row}`) &&
+        el.attributes('style')?.includes(`grid-column: ${col}`),
+    );
+}
+
 describe('LudoBoard', () => {
   it('renders exactly 4 yards, one per color', () => {
     const wrapper = mount(LudoBoard, {
@@ -69,8 +83,8 @@ describe('LudoBoard', () => {
         myTokens: [],
       },
     });
-    const cell = trackCellAt(wrapper, row, col);
-    expect(cell?.findAll('.track-token')).toHaveLength(1);
+    expect(trackCellAt(wrapper, row, col)).toBeTruthy();
+    expect(tokensAt(wrapper, row, col)).toHaveLength(1);
   });
 
   it('does not render a token that is at home (position -1)', () => {
@@ -110,8 +124,7 @@ describe('LudoBoard', () => {
         myTokens: [],
       },
     });
-    const cell = trackCellAt(wrapper, row, col);
-    expect(cell?.findAll('.track-token')).toHaveLength(1);
+    expect(tokensAt(wrapper, row, col)).toHaveLength(1);
   });
 
   it('shows Home and Finished counts per player', () => {
@@ -175,8 +188,7 @@ describe('LudoBoard', () => {
       },
     });
     expect(wrapper.text()).toContain('Tap a highlighted token');
-    const cell = trackCellAt(wrapper, row, col);
-    const token = cell?.find('.track-token');
+    const [token] = tokensAt(wrapper, row, col);
     expect(token?.classes()).toContain('selectable');
     expect(token?.attributes('disabled')).toBeUndefined();
   });
@@ -192,8 +204,7 @@ describe('LudoBoard', () => {
         myTokens: [], // this token isn't a legal choice
       },
     });
-    const cell = trackCellAt(wrapper, row, col);
-    const token = cell?.find('.track-token');
+    const [token] = tokensAt(wrapper, row, col);
     expect(token?.classes()).not.toContain('selectable');
     expect(token?.attributes('disabled')).toBeDefined();
   });
@@ -210,8 +221,8 @@ describe('LudoBoard', () => {
       },
     });
 
-    const cell = trackCellAt(wrapper, row, col);
-    await cell?.find('.track-token').trigger('click');
+    const [token] = tokensAt(wrapper, row, col);
+    await token?.trigger('click');
 
     expect(wrapper.emitted('selectToken')).toBeTruthy();
     expect(wrapper.emitted('selectToken')?.[0]).toEqual([3]);
@@ -229,8 +240,8 @@ describe('LudoBoard', () => {
       },
     });
 
-    const cell = trackCellAt(wrapper, row, col);
-    await cell?.find('.track-token').trigger('click');
+    const [token] = tokensAt(wrapper, row, col);
+    await token?.trigger('click');
 
     expect(wrapper.emitted('selectToken')).toBeFalsy();
   });
@@ -254,8 +265,7 @@ describe('LudoBoard', () => {
         myTokens: [],
       },
     });
-    const cell = trackCellAt(wrapper, row, col);
-    expect(cell?.findAll('.track-token')).toHaveLength(2);
+    expect(tokensAt(wrapper, row, col)).toHaveLength(2);
   });
 
   it('highlights the active player row based on currentTurnSeat', () => {

@@ -1,8 +1,19 @@
 import { defineStore } from 'pinia';
 import { connectSocket, getSocket } from '../api/socket.client';
 import { WS_EVENTS_IN, WS_EVENTS_OUT } from '../api/ws-events.constants';
+import {
+  playAhh,
+  playHooray,
+  playStairs,
+  playSwallow,
+} from '../lib/game-sounds';
 import { useToastStore } from './toast.store';
 import type { Room } from '../types';
+
+// Must match backend/src/modules/game-gateway/room-scheduler.service.ts
+// TURN_TIMEOUT_MS -- there's no event field carrying this, so it's
+// mirrored here to drive the countdown display.
+const TURN_TIMEOUT_MS = 30_000;
 
 interface DiceRolledEvent {
   seatIndex: number;
@@ -40,6 +51,15 @@ interface PlayerPresenceEvent {
   seatIndex: number;
 }
 
+export interface EventLogEntry {
+  id: number;
+  message: string;
+  timestamp: number;
+}
+
+// Capped so the log can't grow unbounded over a long game session.
+const EVENT_LOG_LIMIT = 40;
+
 interface RoomState {
   room: Room | null;
   boardState: Record<string, unknown> | null;
@@ -49,6 +69,21 @@ interface RoomState {
   awaitingMoveChoice: boolean;
   winnerSeat: number | null;
   listenersBound: boolean;
+  // Epoch ms when the current turn will be auto-skipped by the server, or
+  // null when no turn timer is running (waiting room / game over).
+  turnDeadline: number | null;
+  // Dice value tied to the in-flight move choice, set straight from the
+  // AWAITING_MOVE_CHOICE payload (unlike lastDiceValue, which is delayed
+  // to line up with the dice-roll animation) so move-destination previews
+  // are correct the instant a choice is awaited.
+  awaitingDiceValue: number | null;
+  // Most-recent-first feed of what's happened in the room, for the
+  // activity log shown in RoomView.
+  eventLog: EventLogEntry[];
+  // Drives a brief full-screen animation in RoomView (confetti-ish pop
+  // for good news, a shake for bad news); cleared automatically a moment
+  // after being set.
+  celebration: 'victory' | 'failure' | null;
 }
 
 function displayNameForSeat(room: Room | null, seatIndex: number): string {
@@ -57,6 +92,10 @@ function displayNameForSeat(room: Room | null, seatIndex: number): string {
     'A player'
   );
 }
+
+let celebrationTimer: ReturnType<typeof setTimeout> | undefined;
+
+let nextEventLogId = 1;
 
 export const useRoomStore = defineStore('room', {
   state: (): RoomState => ({
@@ -68,9 +107,32 @@ export const useRoomStore = defineStore('room', {
     awaitingMoveChoice: false,
     winnerSeat: null,
     listenersBound: false,
+    turnDeadline: null,
+    awaitingDiceValue: null,
+    eventLog: [],
+    celebration: null,
   }),
 
   actions: {
+    pushEvent(message: string) {
+      this.eventLog.unshift({
+        id: nextEventLogId++,
+        message,
+        timestamp: Date.now(),
+      });
+      if (this.eventLog.length > EVENT_LOG_LIMIT) {
+        this.eventLog.length = EVENT_LOG_LIMIT;
+      }
+    },
+
+    triggerCelebration(kind: 'victory' | 'failure') {
+      this.celebration = kind;
+      if (celebrationTimer) clearTimeout(celebrationTimer);
+      celebrationTimer = setTimeout(() => {
+        this.celebration = null;
+      }, 1100);
+    },
+
     bindSocketListeners() {
       if (this.listenersBound) return;
       const socket = getSocket();
@@ -85,8 +147,11 @@ export const useRoomStore = defineStore('room', {
         this.currentTurnSeat = payload.currentTurnSeat;
         this.winnerSeat = null;
         this.awaitingMoveChoice = false;
+        this.awaitingDiceValue = null;
         this.isRolling = false;
+        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         toastStore.success('The game has started!');
+        this.pushEvent('🎲 The game has started!');
       });
 
       socket.on(WS_EVENTS_OUT.DICE_ROLLED, (payload: DiceRolledEvent) => {
@@ -98,12 +163,16 @@ export const useRoomStore = defineStore('room', {
           this.lastDiceValue = payload.diceValue;
           this.isRolling = false;
         }, 500);
+        const name = displayNameForSeat(this.room, payload.seatIndex);
+        this.pushEvent(`🎲 ${name} rolled a ${payload.diceValue}.`);
       });
 
       socket.on(
         WS_EVENTS_OUT.AWAITING_MOVE_CHOICE,
-        (_payload: AwaitingMoveChoiceEvent) => {
+        (payload: AwaitingMoveChoiceEvent) => {
           this.awaitingMoveChoice = true;
+          this.awaitingDiceValue = payload.diceValue;
+          this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         },
       );
 
@@ -111,18 +180,85 @@ export const useRoomStore = defineStore('room', {
         this.boardState = payload.boardState;
         this.currentTurnSeat = payload.nextTurnSeat;
         this.awaitingMoveChoice = false;
+        this.awaitingDiceValue = null;
+        // Optimistic reschedule; a GAME_OVER right behind this clears it.
+        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+
+        const name = displayNameForSeat(this.room, payload.seatIndex);
+        const movePayload = payload.movePayload ?? {};
+        const captured = movePayload.captured as
+          | Array<{ seatIndex: number; tokenId: number }>
+          | undefined;
+
+        // Snake/ladder detection: the raw square a token landed on
+        // (before the engine resolved the snake/ladder teleport) is
+        // where a bite/climb would show up in that game's config map.
+        const isSnakesLadders = this.room?.gameType.code === 'snakes_ladders';
+        const from = movePayload.from as number | undefined;
+        const rolled = movePayload.rolled as number | undefined;
+        const rawLanding =
+          from != null && rolled != null ? from + rolled : undefined;
+        const slBoard = payload.boardState as {
+          snakes?: Record<number, number>;
+          ladders?: Record<number, number>;
+        };
+
+        if (movePayload.noLegalMove) {
+          this.pushEvent(`↪️ ${name} had no legal move.`);
+          playAhh();
+        } else if (captured && captured.length > 0) {
+          const capturedNames = [
+            ...new Set(
+              captured.map((c) => displayNameForSeat(this.room, c.seatIndex)),
+            ),
+          ].join(', ');
+          this.pushEvent(`💥 ${name} sent ${capturedNames} home!`);
+          playHooray();
+          this.triggerCelebration('victory');
+        } else if (
+          isSnakesLadders &&
+          rawLanding != null &&
+          slBoard.snakes?.[rawLanding] !== undefined
+        ) {
+          this.pushEvent(`🐍 ${name} got swallowed by a snake!`);
+          playSwallow();
+          this.triggerCelebration('failure');
+        } else if (
+          isSnakesLadders &&
+          rawLanding != null &&
+          slBoard.ladders?.[rawLanding] !== undefined
+        ) {
+          this.pushEvent(`🪜 ${name} climbed a ladder!`);
+          playStairs();
+          this.triggerCelebration('victory');
+        } else {
+          this.pushEvent(`♟️ ${name} moved.`);
+        }
       });
 
       socket.on(WS_EVENTS_OUT.TURN_SKIPPED, (payload: TurnSkippedEvent) => {
         this.awaitingMoveChoice = false;
+        this.awaitingDiceValue = null;
         this.isRolling = false;
         this.lastDiceValue = null;
+        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         const name = displayNameForSeat(this.room, payload.seatIndex);
         toastStore.info(`${name}'s turn was skipped (${payload.reason}).`);
+        this.pushEvent(`⏭️ ${name}'s turn was skipped (${payload.reason}).`);
+        playAhh();
       });
 
       socket.on(WS_EVENTS_OUT.GAME_OVER, (payload: GameOverEvent) => {
         this.winnerSeat = payload.winnerSeat ?? null;
+        this.turnDeadline = null;
+        this.awaitingDiceValue = null;
+        const name =
+          payload.winnerSeat != null
+            ? displayNameForSeat(this.room, payload.winnerSeat)
+            : null;
+        this.pushEvent(name ? `🏆 ${name} won the game!` : '🏁 Game over.');
+        playHooray();
+        this.triggerCelebration('victory');
       });
 
       socket.on(
@@ -130,6 +266,7 @@ export const useRoomStore = defineStore('room', {
         (payload: PlayerPresenceEvent) => {
           const name = displayNameForSeat(this.room, payload.seatIndex);
           toastStore.info(`${name} disconnected.`);
+          this.pushEvent(`🔌 ${name} disconnected.`);
         },
       );
 
@@ -138,11 +275,21 @@ export const useRoomStore = defineStore('room', {
         (payload: PlayerPresenceEvent) => {
           const name = displayNameForSeat(this.room, payload.seatIndex);
           toastStore.success(`${name} reconnected.`);
+          this.pushEvent(`🔌 ${name} reconnected.`);
         },
       );
 
       socket.on(WS_EVENTS_OUT.PLAYER_KICKED, () => {
         toastStore.info('A player was removed from the room.');
+        this.pushEvent('👢 A player was removed from the room.');
+      });
+
+      socket.on(WS_EVENTS_OUT.ROOM_DELETED, () => {
+        // Applies to everyone in the room, including the admin who
+        // deleted it -- reset local state so RoomView's watcher sends
+        // everyone back to the lobby.
+        toastStore.info('This room has been deleted.');
+        this.resetGameState();
       });
 
       socket.on(WS_EVENTS_OUT.ERROR, (payload: { message: string }) => {
@@ -184,6 +331,10 @@ export const useRoomStore = defineStore('room', {
       getSocket().emit(WS_EVENTS_IN.KICK_PLAYER, { roomId, targetUserId });
     },
 
+    deleteRoom(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.DELETE_ROOM, { roomId });
+    },
+
     resetGameState() {
       this.room = null;
       this.boardState = null;
@@ -192,6 +343,11 @@ export const useRoomStore = defineStore('room', {
       this.isRolling = false;
       this.awaitingMoveChoice = false;
       this.winnerSeat = null;
+      this.turnDeadline = null;
+      this.awaitingDiceValue = null;
+      this.eventLog = [];
+      if (celebrationTimer) clearTimeout(celebrationTimer);
+      this.celebration = null;
     },
   },
 });

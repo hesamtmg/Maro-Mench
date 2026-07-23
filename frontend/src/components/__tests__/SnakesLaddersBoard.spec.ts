@@ -72,18 +72,18 @@ describe('SnakesLaddersBoard', () => {
     expect(square4?.classes()).toContain('sl-ladder-bottom');
   });
 
-  it("renders a token dot on a player's current square", () => {
+  it("renders a token dot for a player's current square", () => {
+    // Tokens live in their own overlay (positioned by percent, see
+    // below), not nested inside the .sl-square they're currently on --
+    // that's what lets a move animate as a smooth left/top transition
+    // on one persistent element instead of popping into a new parent.
     const wrapper = mount(SnakesLaddersBoard, {
       props: {
         boardState: { positions: { 0: 42 }, snakes: {}, ladders: {} },
         players: [makePlayer({ seatIndex: 0 })],
       },
     });
-    const squares = wrapper.findAll('.sl-square');
-    const square42 = squares.find(
-      (s) => s.find('.square-index').text() === '42',
-    );
-    expect(square42?.findAll('.token-dot')).toHaveLength(1);
+    expect(wrapper.findAll('.tokens-overlay .token-dot')).toHaveLength(1);
   });
 
   it('treats a missing position as square 0 (not yet placed on the board)', () => {
@@ -93,7 +93,7 @@ describe('SnakesLaddersBoard', () => {
         players: [makePlayer({ seatIndex: 0 })],
       },
     });
-    expect(wrapper.findAll('.sl-square .token-dot')).toHaveLength(0);
+    expect(wrapper.findAll('.tokens-overlay .token-dot')).toHaveLength(0);
   });
 
   it('highlights the active player row based on currentTurnSeat', () => {
@@ -122,11 +122,7 @@ describe('SnakesLaddersBoard', () => {
         ],
       },
     });
-    const squares = wrapper.findAll('.sl-square');
-    const square20 = squares.find(
-      (s) => s.find('.square-index').text() === '20',
-    );
-    expect(square20?.findAll('.token-dot')).toHaveLength(2);
+    expect(wrapper.findAll('.tokens-overlay .token-dot')).toHaveLength(2);
   });
 
   describe('SVG overlay (snake bodies and ladder rails)', () => {

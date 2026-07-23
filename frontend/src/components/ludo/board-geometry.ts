@@ -57,6 +57,16 @@ export const TRACK_LENGTH = 52;
 export const HOME_RUN_LENGTH = 6;
 export const FINISHED_POSITION = TRACK_LENGTH + HOME_RUN_LENGTH; // 58
 
+// Entry square (on the shared 0-51 track) for each seat's tokens when they
+// leave home. Matches backend/src/modules/game-engine/ludo/board-config.ts
+// ENTRY_OFFSETS exactly.
+export const ENTRY_OFFSETS: Record<number, number> = {
+  0: 0,
+  1: 13,
+  2: 26,
+  3: 39,
+};
+
 /**
  * Converts an engine token position (as produced by the Ludo engine's
  * board_state) into a grid cell, for a given seat.

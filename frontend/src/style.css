@@ -1,15 +1,25 @@
 :root {
-  --color-bg: #f4f5f7;
-  --color-surface: #ffffff;
-  --color-primary: #4f46e5;
-  --color-primary-hover: #4338ca;
-  --color-text: #1f2430;
-  --color-text-muted: #6b7280;
-  --color-border: #e2e5ea;
-  --color-danger: #dc2626;
-  --color-success: #16a34a;
-  --radius: 8px;
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Dark, saturated "game portal" palette (Foony-inspired): deep purple/navy
+     chrome with punchy accent colors, rather than a flat corporate light UI. */
+  --color-bg: #170c25;
+  --color-bg-gradient: radial-gradient(
+      circle at 20% 0%,
+      #2b2d42 0%,
+      transparent 55%
+    ),
+    linear-gradient(160deg, #1d1233 0%, #170c25 60%, #10081a 100%);
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-surface-solid: #241a3d;
+  --color-primary: #9333ea;
+  --color-primary-hover: #7e22ce;
+  --color-text: #f5f3fa;
+  --color-text-muted: #ac9fc9;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --radius: 14px;
+  --font: 'Exo 2', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    sans-serif;
 }
 
 * {
@@ -23,18 +33,90 @@ body {
 }
 
 body {
+  position: relative;
   font-family: var(--font);
-  background: var(--color-bg);
+  background: var(--color-bg-gradient), var(--color-bg);
+  background-attachment: fixed;
   color: var(--color-text);
   min-height: 100vh;
+  overflow-x: hidden;
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fde047'/%3E%3Cstop offset='1' stop-color='%23c084fc'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M12 2 L15 9 L22 12 L15 15 L12 22 L9 15 L2 12 L9 9 Z' fill='url(%23g)' stroke='white' stroke-width='0.6' stroke-opacity='0.9'/%3E%3C/svg%3E")
+      12 12,
+    auto;
+}
+
+/* Starry backdrop: a small tile of scattered dots repeated across the
+   whole page, sitting behind #app so cards' translucent surfaces show
+   stars softly through them. Kept on a fixed pseudo-element (not the
+   body's own background) so it can twinkle independently of the
+   purple background gradient. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.6px 1.6px at 10% 20%, #fff, transparent),
+    radial-gradient(1px 1px at 25% 65%, #fff, transparent),
+    radial-gradient(2px 2px at 40% 12%, #fff, transparent),
+    radial-gradient(1px 1px at 58% 82%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 72% 38%, #fff, transparent),
+    radial-gradient(1px 1px at 86% 68%, #fff, transparent),
+    radial-gradient(2px 2px at 95% 22%, #fff, transparent),
+    radial-gradient(1px 1px at 15% 90%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 33% 45%, #fff, transparent),
+    radial-gradient(1px 1px at 63% 8%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 80% 88%, #fff, transparent),
+    radial-gradient(1px 1px at 5% 55%, #fff, transparent);
+  background-repeat: repeat;
+  background-size: 260px 260px;
+  opacity: 0.5;
+  animation: twinkle 5s ease-in-out infinite alternate;
+}
+
+@keyframes twinkle {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 0.75;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* Game-y pointer cursor for anything clickable, distinct from the
+   sparkle default cursor above -- a little gold reticle/token ring. */
+button:not(:disabled),
+a,
+select {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%23fbbf24' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='3' fill='%23fbbf24'/%3E%3C/svg%3E")
+      12 12,
+    pointer;
 }
 
 #app {
   min-height: 100vh;
+  position: relative;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 800;
+  letter-spacing: 0.01em;
 }
 
 a {
-  color: var(--color-primary);
+  color: #c084fc;
   text-decoration: none;
 }
 
@@ -57,44 +139,53 @@ select {
   border-radius: var(--radius);
   border: 1px solid transparent;
   font-size: 0.95rem;
-  font-weight: 600;
-  transition: background 0.15s ease;
+  font-weight: 700;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
 }
 
 .btn-primary {
-  background: var(--color-primary);
+  background: linear-gradient(135deg, #a855f7, #7e22ce);
   color: white;
+  box-shadow: 0 4px 14px rgba(147, 51, 234, 0.4);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(147, 51, 234, 0.55);
 }
 
 .btn-secondary {
-  background: var(--color-surface);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--color-text);
   border-color: var(--color-border);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: var(--color-bg);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .btn-danger {
-  background: var(--color-danger);
+  background: linear-gradient(135deg, #f87171, #dc2626);
   color: white;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .card {
   background: var(--color-surface);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 1.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .form-group {
@@ -113,6 +204,8 @@ select {
 .form-group input,
 .form-group select {
   padding: 0.6rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   font-size: 0.95rem;
@@ -125,7 +218,7 @@ select {
 }
 
 .error-text {
-  color: var(--color-danger);
+  color: #fca5a5;
   font-size: 0.85rem;
 }
 
@@ -173,11 +266,11 @@ select {
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
-  background: var(--color-bg);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--color-text-muted);
 }
 
 .badge-live {
-  background: #dcfce7;
-  color: var(--color-success);
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
 }

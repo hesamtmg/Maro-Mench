@@ -103,4 +103,13 @@ export class RoomsController {
     );
     return serializeRoomForResponse(room);
   }
+
+  @Delete(':id')
+  async deleteRoom(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.roomsService.deleteRoom(id, user.userId);
+    return { id, deleted: true };
+  }
 }

@@ -49,4 +49,10 @@ export const roomsApi = {
       .delete<Room>(`/rooms/${roomId}/players/${targetUserId}`)
       .then((res) => res.data);
   },
+
+  deleteRoom(id: string) {
+    return httpClient
+      .delete<{ id: string; deleted: boolean }>(`/rooms/${id}`)
+      .then((res) => res.data);
+  },
 };

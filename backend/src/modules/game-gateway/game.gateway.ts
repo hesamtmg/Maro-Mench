@@ -172,10 +172,15 @@ export class GameGateway
     const refreshedRoom = await this.roomsService.findRoomOrThrow(
       payload.roomId,
     );
-    socket.emit(
-      WS_EVENTS_OUT.ROOM_STATE,
-      serializeRoomForResponse(refreshedRoom),
-    );
+    // Broadcast to the whole room, not just the joiner -- other members
+    // already sitting in the waiting room need this to see the new
+    // player appear (and for the admin's start-game gating to react).
+    this.broadcastRoomState(refreshedRoom);
+    if (refreshedRoom.visibility === RoomVisibility.PUBLIC) {
+      this.server.emit(WS_EVENTS_OUT.ROOM_LIST_UPDATED, {
+        roomId: refreshedRoom.id,
+      });
+    }
 
     if (refreshedRoom.status === RoomStatus.IN_PROGRESS) {
       const gameState = await this.gameStateService.getGameState(
@@ -196,16 +201,39 @@ export class GameGateway
     void socket.leave(payload.roomId);
     this.socketToRoom.delete(socket.id);
 
-    const room = await this.roomsService.leaveRoom(
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+
+    if (player && room.status === RoomStatus.IN_PROGRESS) {
+      // Hitting "leave" mid-game is treated the same as a disconnect --
+      // it keeps your seat (and boardState) intact so you can rejoin and
+      // resume later, rather than permanently vacating it. The active
+      // turn-timeout (if it's your turn) will auto-skip you when it
+      // fires, same as a dropped connection would.
+      await this.roomsService.markPlayerStatus(
+        player.id,
+        RoomPlayerStatus.DISCONNECTED,
+      );
+      this.server.to(payload.roomId).emit(WS_EVENTS_OUT.PLAYER_DISCONNECTED, {
+        userId: socket.data.userId,
+        seatIndex: player.seatIndex,
+      });
+      return;
+    }
+
+    // Waiting room (or already finished): leaving actually frees the seat.
+    const updatedRoom = await this.roomsService.leaveRoom(
       payload.roomId,
       socket.data.userId,
     );
-    this.broadcastRoomState(room);
+    this.broadcastRoomState(updatedRoom);
     this.server.to(payload.roomId).emit(WS_EVENTS_OUT.PLAYER_LEFT, {
       userId: socket.data.userId,
     });
-    if (room.visibility === RoomVisibility.PUBLIC) {
-      this.server.emit(WS_EVENTS_OUT.ROOM_LIST_UPDATED, { roomId: room.id });
+    if (updatedRoom.visibility === RoomVisibility.PUBLIC) {
+      this.server.emit(WS_EVENTS_OUT.ROOM_LIST_UPDATED, {
+        roomId: updatedRoom.id,
+      });
     }
   }
 
@@ -224,6 +252,30 @@ export class GameGateway
       this.server.to(payload.roomId).emit(WS_EVENTS_OUT.PLAYER_KICKED, {
         userId: payload.targetUserId,
       });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  @SubscribeMessage(WS_EVENTS_IN.DELETE_ROOM)
+  async onDeleteRoom(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: RoomIdPayload,
+  ) {
+    try {
+      const room = await this.roomsService.deleteRoom(
+        payload.roomId,
+        socket.data.userId,
+      );
+      this.scheduler.clearAllForRoom(payload.roomId);
+      this.server
+        .to(payload.roomId)
+        .emit(WS_EVENTS_OUT.ROOM_DELETED, { roomId: payload.roomId });
+      if (room.visibility === RoomVisibility.PUBLIC) {
+        this.server.emit(WS_EVENTS_OUT.ROOM_LIST_UPDATED, {
+          roomId: payload.roomId,
+        });
+      }
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -287,6 +339,10 @@ export class GameGateway
     }
 
     const gameState = await this.gameStateService.startGame(room);
+    // startGame() flips room.status to IN_PROGRESS on this same in-memory
+    // instance; broadcast it so clients already sitting in the room (whose
+    // local room.status otherwise never changes) leave the waiting view.
+    this.broadcastRoomState(room);
     this.server.to(payload.roomId).emit(WS_EVENTS_OUT.GAME_STARTED, {
       boardState: gameState.boardState,
       currentTurnSeat: gameState.currentTurnSeat,

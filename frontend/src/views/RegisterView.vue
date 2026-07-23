@@ -24,7 +24,7 @@ async function handleSubmit() {
       password: password.value,
       displayName: displayName.value,
     });
-    await router.push({ name: 'lobby' });
+    await router.push({ name: 'home' });
   } catch (err) {
     const axiosErr = err as AxiosError<{ message: string | string[] }>;
     const message = axiosErr.response?.data?.message;

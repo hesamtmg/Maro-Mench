@@ -10,6 +10,7 @@ export const WS_EVENTS_IN = {
   ROLL_DICE: 'roll_dice',
   MAKE_MOVE: 'make_move',
   KICK_PLAYER: 'kick_player',
+  DELETE_ROOM: 'delete_room',
   JOIN_QUEUE: 'join_queue',
   CANCEL_QUEUE: 'cancel_queue',
 } as const;
@@ -20,6 +21,7 @@ export const WS_EVENTS_OUT = {
   PLAYER_JOINED: 'player_joined',
   PLAYER_LEFT: 'player_left',
   PLAYER_KICKED: 'player_kicked',
+  ROOM_DELETED: 'room_deleted',
   PLAYER_DISCONNECTED: 'player_disconnected',
   PLAYER_RECONNECTED: 'player_reconnected',
   GAME_STARTED: 'game_started',

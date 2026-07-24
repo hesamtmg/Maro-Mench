@@ -15,6 +15,12 @@ export const WS_EVENTS_IN = {
   // Matter.js locally and relays positions + the final result directly.
   OLO_LIVE_POSITIONS: 'olo_live_positions', // { roomId, positions: [{id,x,y}] } -- ephemeral, not persisted
   OLO_SHOT_RESULT: 'olo_shot_result', // { roomId, boardState, nextTurnSeat, isGameOver, winnerSeat? }
+  // Monopoly-only: these fall outside the shared roll/move contract (a
+  // purchase decision isn't a "move", and building/paying-out-of-jail
+  // don't consume a turn), so they get their own dedicated events.
+  MONOPOLY_PURCHASE_DECISION: 'monopoly_purchase_decision', // { roomId, buy }
+  MONOPOLY_BUILD_HOUSE: 'monopoly_build_house', // { roomId, spaceIndex }
+  MONOPOLY_PAY_JAIL_FINE: 'monopoly_pay_jail_fine', // { roomId }
 } as const;
 
 // Server -> Client events
@@ -39,4 +45,5 @@ export const WS_EVENTS_OUT = {
   ERROR: 'error_event', // { message }
   OLO_LIVE_POSITIONS: 'olo_live_positions', // relayed to the other player only
   OLO_SHOT_RESULT: 'olo_shot_result', // broadcast to the whole room
+  MONOPOLY_STATE_UPDATED: 'monopoly_state_updated', // { boardState } -- build-house / pay-jail-fine, no turn change
 } as const;

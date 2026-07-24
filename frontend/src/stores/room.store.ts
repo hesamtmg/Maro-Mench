@@ -64,6 +64,10 @@ interface OloShotResultEvent {
   nextTurnSeat: number;
 }
 
+interface MonopolyStateUpdatedEvent {
+  boardState: Record<string, unknown>;
+}
+
 export interface EventLogEntry {
   id: number;
   message: string;
@@ -101,6 +105,29 @@ interface RoomState {
   // whichever player is mid-shot, for OloBoard to render while spectating
   // (not persisted -- overwritten by each new packet).
   oloLiveOpponentPositions: OloLivePositionsEvent | null;
+}
+
+function monopolyEventMessage(
+  name: string,
+  payload: Record<string, unknown>,
+): string {
+  if (payload.skipped) return `⏭️ ${name} has no properties left to lose -- skipped.`;
+  if (payload.wentBankrupt) return `💸 ${name} went bankrupt!`;
+  if (payload.sentToJail) return `🚔 ${name} was sent to jail.`;
+  if (payload.jailEvent === 'rolled_out') {
+    return `🎲 ${name} rolled doubles and got out of jail!`;
+  }
+  if (payload.jailEvent === 'forced_fine') {
+    return `💰 ${name} paid the fine to leave jail.`;
+  }
+  if (payload.jailEvent === 'stayed') return `⛓️ ${name} stayed in jail.`;
+  if (payload.purchased === true) return `🏠 ${name} bought a property.`;
+  if (payload.purchased === false) return `🙅 ${name} declined to buy.`;
+  if (payload.card) return `🃏 ${name} drew a card: ${payload.card as string}`;
+  if (payload.taxPaid) return `🧾 ${name} paid $${payload.taxPaid} in tax.`;
+  if (payload.rentPaid) return `💵 ${name} paid $${payload.rentPaid} in rent.`;
+  if (payload.landedOn) return `♟️ ${name} landed on ${payload.landedOn as string}.`;
+  return `♟️ ${name} moved.`;
 }
 
 function displayNameForSeat(room: Room | null, seatIndex: number): string {
@@ -224,7 +251,12 @@ export const useRoomStore = defineStore('room', {
           ladders?: Record<number, number>;
         };
 
-        if (movePayload.noLegalMove) {
+        const isMonopoly = this.room?.gameType.code === 'monopoly';
+
+        if (isMonopoly) {
+          this.pushEvent(monopolyEventMessage(name, movePayload));
+          if (movePayload.wentBankrupt || movePayload.rentPaid) playCrash();
+        } else if (movePayload.noLegalMove) {
           this.pushEvent(`↪️ ${name} had no legal move.`);
           playAhh();
         } else if (captured && captured.length > 0) {
@@ -340,6 +372,16 @@ export const useRoomStore = defineStore('room', {
         this.pushEvent(`🥏 ${name} took a shot.`);
       });
 
+      // Monopoly only: building a house or paying the jail fine changes
+      // boardState without consuming the turn, so it's a separate event
+      // from MOVE_APPLIED (which always carries a nextTurnSeat change).
+      socket.on(
+        WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED,
+        (payload: MonopolyStateUpdatedEvent) => {
+          this.boardState = payload.boardState;
+        },
+      );
+
       this.listenersBound = true;
     },
 
@@ -387,6 +429,18 @@ export const useRoomStore = defineStore('room', {
       },
     ) {
       getSocket().emit(WS_EVENTS_IN.OLO_SHOT_RESULT, { roomId, ...payload });
+    },
+
+    monopolyPurchaseDecision(roomId: string, buy: boolean) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PURCHASE_DECISION, { roomId, buy });
+    },
+
+    monopolyBuildHouse(roomId: string, spaceIndex: number) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_BUILD_HOUSE, { roomId, spaceIndex });
+    },
+
+    monopolyPayJailFine(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE, { roomId });
     },
 
     kickPlayer(roomId: string, targetUserId: string) {

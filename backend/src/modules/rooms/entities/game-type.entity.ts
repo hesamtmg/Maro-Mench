@@ -4,6 +4,7 @@ export enum GameTypeCode {
   LUDO = 'ludo',
   SNAKES_LADDERS = 'snakes_ladders',
   OLO = 'olo',
+  MONOPOLY = 'monopoly',
 }
 
 @Entity('game_types')

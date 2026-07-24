@@ -5,6 +5,7 @@ import { roomsApi } from "../api/rooms.api";
 import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
+import MonopolyBoard from "../components/MonopolyBoard.vue";
 import OloBoard from "../components/OloBoard.vue";
 import PlayerList from "../components/PlayerList.vue";
 import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
@@ -106,6 +107,18 @@ function handleOloShotResult(payload: {
   });
 }
 
+function handleMonopolyBuyDecision(buy: boolean) {
+  roomStore.monopolyPurchaseDecision(props.id, buy);
+}
+
+function handleMonopolyBuildHouse(spaceIndex: number) {
+  roomStore.monopolyBuildHouse(props.id, spaceIndex);
+}
+
+function handleMonopolyPayJailFine() {
+  roomStore.monopolyPayJailFine(props.id);
+}
+
 async function handleLeaveRoom() {
   roomStore.leaveRoom(props.id);
   await router.push({ name: "lobby" });
@@ -182,6 +195,20 @@ function oloScore(seatIndex: number): number {
     scores?: Record<number, number>;
   } | null;
   return state?.scores?.[seatIndex] ?? 0;
+}
+
+function monopolyCash(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    players?: Record<number, { cash: number; bankrupt: boolean }>;
+  } | null;
+  return state?.players?.[seatIndex]?.cash ?? 0;
+}
+
+function monopolyBankrupt(seatIndex: number): boolean {
+  const state = roomStore.boardState as {
+    players?: Record<number, { bankrupt: boolean }>;
+  } | null;
+  return state?.players?.[seatIndex]?.bankrupt ?? false;
 }
 
 const myLudoTokens = computed(() => {
@@ -382,6 +409,10 @@ onMounted(() => {
               <span v-else-if="gameTypeCode === 'olo'" class="text-muted">
                 Score: {{ oloScore(player.seatIndex) }}
               </span>
+              <span v-else-if="gameTypeCode === 'monopoly'" class="text-muted">
+                ${{ monopolyCash(player.seatIndex) }}
+                <template v-if="monopolyBankrupt(player.seatIndex)">· bankrupt</template>
+              </span>
             </div>
           </div>
 
@@ -430,6 +461,17 @@ onMounted(() => {
             @live-positions="handleOloLivePositions"
             @shot-result="handleOloShotResult"
           />
+          <MonopolyBoard
+            v-else-if="gameTypeCode === 'monopoly'"
+            :board-state="roomStore.boardState as any"
+            :players="roomStore.room.players"
+            :current-turn-seat="roomStore.currentTurnSeat"
+            :my-seat-index="myPlayer?.seatIndex ?? null"
+            hide-player-summary
+            @buy-decision="handleMonopolyBuyDecision"
+            @build-house="handleMonopolyBuildHouse"
+            @pay-jail-fine="handleMonopolyPayJailFine"
+          />
         </div>
       </div>
 
@@ -465,6 +507,16 @@ onMounted(() => {
           :live-opponent-positions="roomStore.oloLiveOpponentPositions"
           @live-positions="handleOloLivePositions"
           @shot-result="handleOloShotResult"
+        />
+        <MonopolyBoard
+          v-else-if="gameTypeCode === 'monopoly'"
+          :board-state="roomStore.boardState as any"
+          :players="roomStore.room.players"
+          :current-turn-seat="roomStore.currentTurnSeat"
+          :my-seat-index="myPlayer?.seatIndex ?? null"
+          @buy-decision="handleMonopolyBuyDecision"
+          @build-house="handleMonopolyBuildHouse"
+          @pay-jail-fine="handleMonopolyPayJailFine"
         />
 
         <div v-if="roomStore.eventLog.length" class="event-log card">

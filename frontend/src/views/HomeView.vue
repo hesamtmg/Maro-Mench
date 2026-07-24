@@ -16,6 +16,24 @@ const slSwatch = Array.from({ length: 16 }, (_, i) => {
   return SL_CELL_COLORS[(row + col) % SL_CELL_COLORS.length];
 });
 
+// Tycoon tile: a strip of property-group colors, echoing the real board's
+// color groups at a glance.
+const MONOPOLY_CELL_COLORS = [
+  '#8b5a2b',
+  '#7ec8e3',
+  '#e0559e',
+  '#f0932b',
+  '#eb4d4b',
+  '#f6e58d',
+  '#38ac6a',
+  '#3455db',
+];
+const monopolySwatch = Array.from({ length: 16 }, (_, i) => {
+  const row = Math.floor(i / 4);
+  const col = i % 4;
+  return MONOPOLY_CELL_COLORS[(row * 4 + col) % MONOPOLY_CELL_COLORS.length];
+});
+
 function chooseGame(gameTypeCode: GameTypeCode) {
   void router.push({ name: 'lobby', query: { game: gameTypeCode } });
 }
@@ -74,6 +92,18 @@ async function handleLogout() {
           Practice offline
         </RouterLink>
       </div>
+
+      <button class="game-tile" @click="chooseGame('monopoly')">
+        <span class="game-tile-pic monopoly-pic" aria-hidden="true">
+          <span
+            v-for="(color, i) in monopolySwatch"
+            :key="i"
+            class="monopoly-pic-cell"
+            :style="{ background: color }"
+          />
+        </span>
+        <strong>Tycoon</strong>
+      </button>
     </div>
   </div>
 </template>
@@ -197,5 +227,16 @@ async function handleLogout() {
   background: #4a5fc1;
   bottom: 22%;
   right: 18%;
+}
+
+/* Tycoon tile: a patchwork of the board's property-group colors. */
+.monopoly-pic {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+}
+
+.monopoly-pic-cell {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
 }
 </style>

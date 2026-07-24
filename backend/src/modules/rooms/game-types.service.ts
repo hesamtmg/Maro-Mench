@@ -22,6 +22,12 @@ const DEFAULT_GAME_TYPES: Array<Omit<GameType, 'id'>> = [
     minPlayers: 2,
     maxPlayers: 2,
   },
+  {
+    code: GameTypeCode.MONOPOLY,
+    name: 'Tycoon',
+    minPlayers: 2,
+    maxPlayers: 6,
+  },
 ];
 
 @Injectable()

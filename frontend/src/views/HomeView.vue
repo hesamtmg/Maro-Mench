@@ -61,6 +61,19 @@ async function handleLogout() {
         <strong>Snakes &amp; Ladders</strong>
 
       </button>
+
+      <div class="game-tile-group">
+        <button class="game-tile" @click="chooseGame('olo')">
+          <span class="game-tile-pic olo-pic" aria-hidden="true">
+            <span class="olo-pic-disc olo-pic-disc-1" />
+            <span class="olo-pic-disc olo-pic-disc-2" />
+          </span>
+          <strong>OLO</strong>
+        </button>
+        <RouterLink :to="{ name: 'olo-practice' }" class="text-muted practice-link">
+          Practice offline
+        </RouterLink>
+      </div>
     </div>
   </div>
 </template>
@@ -71,6 +84,17 @@ async function handleLogout() {
   flex-wrap: wrap;
   justify-content: center;
   gap: 2rem;
+}
+
+.game-tile-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.practice-link {
+  font-size: 0.8rem;
 }
 
 .game-tile {
@@ -144,5 +168,34 @@ async function handleLogout() {
 
 .sl-pic-cell {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+/* OLO tile: two discs about to collide, echoing the disc-duel concept. */
+.olo-pic {
+  background: #14110f;
+  position: relative;
+}
+
+.olo-pic-disc {
+  position: absolute;
+  width: 36%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow:
+    0 3px 5px rgba(0, 0, 0, 0.6),
+    inset 0 -4px 6px rgba(0, 0, 0, 0.4),
+    inset 0 2px 3px rgba(255, 255, 255, 0.35);
+}
+
+.olo-pic-disc-1 {
+  background: #e0562a;
+  top: 24%;
+  left: 20%;
+}
+
+.olo-pic-disc-2 {
+  background: #4a5fc1;
+  bottom: 22%;
+  right: 18%;
 }
 </style>

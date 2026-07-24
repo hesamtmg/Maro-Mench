@@ -3,6 +3,7 @@ import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 export enum GameTypeCode {
   LUDO = 'ludo',
   SNAKES_LADDERS = 'snakes_ladders',
+  OLO = 'olo',
 }
 
 @Entity('game_types')

@@ -16,6 +16,12 @@ const DEFAULT_GAME_TYPES: Array<Omit<GameType, 'id'>> = [
     minPlayers: 2,
     maxPlayers: 16,
   },
+  {
+    code: GameTypeCode.OLO,
+    name: 'OLO',
+    minPlayers: 2,
+    maxPlayers: 2,
+  },
 ];
 
 @Injectable()

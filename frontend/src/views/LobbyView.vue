@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { roomsApi } from '../api/rooms.api';
 import { connectSocket, getSocket } from '../api/socket.client';
@@ -59,6 +59,21 @@ const createVisibility = ref<'public' | 'private'>('public');
 const createMaxPlayers = ref(4);
 const isCreating = ref(false);
 const createError = ref('');
+
+// Ludo is fixed at 4 seats, OLO is a strict 1v1, Snakes & Ladders scales
+// up to 16 -- keep the max-players input's cap (and current value)
+// matched to whichever game is selected.
+const createMaxPlayersLimit = computed(() => {
+  if (createGameType.value === 'ludo') return 4;
+  if (createGameType.value === 'olo') return 2;
+  return 16;
+});
+
+function handleCreateGameTypeChange() {
+  const limit = createMaxPlayersLimit.value;
+  if (createMaxPlayers.value > limit) createMaxPlayers.value = limit;
+  if (createGameType.value === 'olo') createMaxPlayers.value = 2;
+}
 
 async function handleCreateRoom() {
   createError.value = '';
@@ -153,11 +168,15 @@ async function handleLogout() {
 }
 
 onMounted(() => {
-  // Arriving from the game-picker (HomeView) with ?game=ludo|snakes_ladders
+  // Arriving from the game-picker (HomeView) with ?game=ludo|snakes_ladders|olo
   // scopes every game-type select here to that choice, so "pick a game,
   // land in the lobby already set up for it" actually holds.
   const gameParam = route.query.game;
-  if (gameParam === 'ludo' || gameParam === 'snakes_ladders') {
+  if (
+    gameParam === 'ludo' ||
+    gameParam === 'snakes_ladders' ||
+    gameParam === 'olo'
+  ) {
     createGameType.value = gameParam;
     publicRoomsGameFilter.value = gameParam;
     queueGameType.value = gameParam;
@@ -240,6 +259,7 @@ onUnmounted(() => {
           <option value="">All games</option>
           <option value="ludo">Ludo </option>
           <option value="snakes_ladders">Snakes &amp; Ladders</option>
+          <option value="olo">OLO</option>
         </select>
         <button class="btn btn-secondary" @click="loadPublicRooms">
           Refresh
@@ -283,11 +303,16 @@ onUnmounted(() => {
       <form class="stack" @submit.prevent="handleCreateRoom">
         <div class="form-group">
           <label for="createGameType">Game</label>
-          <select id="createGameType" v-model="createGameType">
+          <select
+            id="createGameType"
+            v-model="createGameType"
+            @change="handleCreateGameTypeChange"
+          >
             <option value="ludo">Ludo </option>
             <option value="snakes_ladders">
-              Snakes &amp; Ladders 
+              Snakes &amp; Ladders
             </option>
+            <option value="olo">OLO</option>
           </select>
         </div>
 
@@ -306,7 +331,8 @@ onUnmounted(() => {
             v-model.number="createMaxPlayers"
             type="number"
             min="2"
-            :max="createGameType === 'ludo' ? 4 : 16"
+            :max="createMaxPlayersLimit"
+            :disabled="createGameType === 'olo'"
           />
         </div>
 
@@ -355,6 +381,7 @@ onUnmounted(() => {
         <select id="queueGameType" v-model="queueGameType" :disabled="isQueued">
           <option value="ludo">Ludo </option>
           <option value="snakes_ladders">Snakes &amp; Ladders </option>
+          <option value="olo">OLO</option>
         </select>
       </div>
 

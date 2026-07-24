@@ -47,6 +47,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
       props: true,
     },
+    {
+      path: '/olo/practice',
+      name: 'olo-practice',
+      component: () => import('../views/OloPracticeView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 });
 

@@ -10,6 +10,11 @@ export const WS_EVENTS_IN = {
   DELETE_ROOM: 'delete_room', // { roomId } (admin only)
   JOIN_QUEUE: 'join_queue', // { gameTypeCode, rulesJson? }
   CANCEL_QUEUE: 'cancel_queue', // {}
+  // OLO is real-time physics (drag-and-flick), not discrete dice/moves --
+  // it bypasses ROLL_DICE/MAKE_MOVE entirely. The shooting client runs
+  // Matter.js locally and relays positions + the final result directly.
+  OLO_LIVE_POSITIONS: 'olo_live_positions', // { roomId, positions: [{id,x,y}] } -- ephemeral, not persisted
+  OLO_SHOT_RESULT: 'olo_shot_result', // { roomId, boardState, nextTurnSeat, isGameOver, winnerSeat? }
 } as const;
 
 // Server -> Client events
@@ -32,4 +37,6 @@ export const WS_EVENTS_OUT = {
   QUEUE_CANCELLED: 'queue_cancelled',
   MATCH_FOUND: 'match_found', // { roomId }
   ERROR: 'error_event', // { message }
+  OLO_LIVE_POSITIONS: 'olo_live_positions', // relayed to the other player only
+  OLO_SHOT_RESULT: 'olo_shot_result', // broadcast to the whole room
 } as const;

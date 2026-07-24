@@ -54,6 +54,16 @@ interface PlayerPresenceEvent {
   seatIndex: number;
 }
 
+interface OloLivePositionsEvent {
+  positions: Array<{ id: string; x: number; y: number }>;
+}
+
+interface OloShotResultEvent {
+  seatIndex: number;
+  boardState: Record<string, unknown>;
+  nextTurnSeat: number;
+}
+
 export interface EventLogEntry {
   id: number;
   message: string;
@@ -87,6 +97,10 @@ interface RoomState {
   // for good news, a shake for bad news); cleared automatically a moment
   // after being set.
   celebration: 'victory' | 'failure' | null;
+  // OLO only: the latest live disc-position snapshot relayed from
+  // whichever player is mid-shot, for OloBoard to render while spectating
+  // (not persisted -- overwritten by each new packet).
+  oloLiveOpponentPositions: OloLivePositionsEvent | null;
 }
 
 function displayNameForSeat(room: Room | null, seatIndex: number): string {
@@ -114,6 +128,7 @@ export const useRoomStore = defineStore('room', {
     awaitingDiceValue: null,
     eventLog: [],
     celebration: null,
+    oloLiveOpponentPositions: null,
   }),
 
   actions: {
@@ -307,6 +322,24 @@ export const useRoomStore = defineStore('room', {
         toastStore.error(payload.message);
       });
 
+      // OLO only: live position relay while the current player's shot is
+      // mid-flight, and the settled result once it stops -- see OloBoard.vue.
+      socket.on(
+        WS_EVENTS_OUT.OLO_LIVE_POSITIONS,
+        (payload: OloLivePositionsEvent) => {
+          this.oloLiveOpponentPositions = payload;
+        },
+      );
+
+      socket.on(WS_EVENTS_OUT.OLO_SHOT_RESULT, (payload: OloShotResultEvent) => {
+        this.boardState = payload.boardState;
+        this.currentTurnSeat = payload.nextTurnSeat;
+        this.oloLiveOpponentPositions = null;
+        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+        const name = displayNameForSeat(this.room, payload.seatIndex);
+        this.pushEvent(`🥏 ${name} took a shot.`);
+      });
+
       this.listenersBound = true;
     },
 
@@ -337,6 +370,25 @@ export const useRoomStore = defineStore('room', {
       getSocket().emit(WS_EVENTS_IN.MAKE_MOVE, { roomId, tokenId });
     },
 
+    sendOloLivePositions(
+      roomId: string,
+      positions: Array<{ id: string; x: number; y: number }>,
+    ) {
+      getSocket().emit(WS_EVENTS_IN.OLO_LIVE_POSITIONS, { roomId, positions });
+    },
+
+    sendOloShotResult(
+      roomId: string,
+      payload: {
+        boardState: Record<string, unknown>;
+        nextTurnSeat: number;
+        isGameOver: boolean;
+        winnerSeat?: number;
+      },
+    ) {
+      getSocket().emit(WS_EVENTS_IN.OLO_SHOT_RESULT, { roomId, ...payload });
+    },
+
     kickPlayer(roomId: string, targetUserId: string) {
       getSocket().emit(WS_EVENTS_IN.KICK_PLAYER, { roomId, targetUserId });
     },
@@ -358,6 +410,7 @@ export const useRoomStore = defineStore('room', {
       this.eventLog = [];
       if (celebrationTimer) clearTimeout(celebrationTimer);
       this.celebration = null;
+      this.oloLiveOpponentPositions = null;
     },
   },
 });

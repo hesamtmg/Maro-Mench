@@ -42,6 +42,19 @@ interface KickPayload {
   targetUserId: string;
 }
 
+interface OloLivePositionsPayload {
+  roomId: string;
+  positions: Array<{ id: string; x: number; y: number }>;
+}
+
+interface OloShotResultPayload {
+  roomId: string;
+  boardState: Record<string, unknown>;
+  nextTurnSeat: number;
+  isGameOver: boolean;
+  winnerSeat?: number;
+}
+
 @WebSocketGateway({
   cors: { origin: process.env.FRONTEND_URL ?? 'http://localhost:5173' },
   namespace: '/game',
@@ -443,6 +456,66 @@ export class GameGateway
       );
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+      this.scheduleTurnTimeoutFor(room.id);
+    }
+  }
+
+  /**
+   * OLO is real-time physics (drag-and-flick), not discrete dice/moves --
+   * it bypasses ROLL_DICE/MAKE_MOVE/engine.applyMove entirely. The
+   * shooting client runs Matter.js locally and is trusted to report the
+   * settled result directly (the "relay" model): this just relays live
+   * positions while a shot is mid-flight (not persisted -- purely a
+   * visual sync for the other player) ...
+   */
+  @SubscribeMessage(WS_EVENTS_IN.OLO_LIVE_POSITIONS)
+  onOloLivePositions(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: OloLivePositionsPayload,
+  ) {
+    socket.to(payload.roomId).emit(WS_EVENTS_OUT.OLO_LIVE_POSITIONS, payload);
+  }
+
+  /** ... and persists + broadcasts the final result once a shot settles,
+   * same as applyAndBroadcastMove does for the discrete-move games. */
+  @SubscribeMessage(WS_EVENTS_IN.OLO_SHOT_RESULT)
+  async onOloShotResult(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: OloShotResultPayload,
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    this.scheduler.clearTurnTimeout(room.id);
+
+    await this.gameStateService.recordMove(room.id, player.seatIndex, null, {
+      nextTurnSeat: payload.nextTurnSeat,
+    });
+
+    await this.gameStateService.updateGameState(gameState, {
+      boardState: payload.boardState,
+      currentTurnSeat: payload.nextTurnSeat,
+    });
+
+    this.server.to(room.id).emit(WS_EVENTS_OUT.OLO_SHOT_RESULT, {
+      seatIndex: player.seatIndex,
+      boardState: payload.boardState,
+      nextTurnSeat: payload.nextTurnSeat,
+    });
+
+    if (payload.isGameOver) {
+      this.scheduler.clearAllForRoom(room.id);
+      await this.gameStateService.finishGame(room.id);
+      this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
+        winnerSeat: payload.winnerSeat,
+      });
+    } else {
       this.scheduleTurnTimeoutFor(room.id);
     }
   }

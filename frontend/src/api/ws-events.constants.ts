@@ -13,6 +13,8 @@ export const WS_EVENTS_IN = {
   DELETE_ROOM: 'delete_room',
   JOIN_QUEUE: 'join_queue',
   CANCEL_QUEUE: 'cancel_queue',
+  OLO_LIVE_POSITIONS: 'olo_live_positions',
+  OLO_SHOT_RESULT: 'olo_shot_result',
 } as const;
 
 export const WS_EVENTS_OUT = {
@@ -34,4 +36,6 @@ export const WS_EVENTS_OUT = {
   QUEUE_CANCELLED: 'queue_cancelled',
   MATCH_FOUND: 'match_found',
   ERROR: 'error_event',
+  OLO_LIVE_POSITIONS: 'olo_live_positions',
+  OLO_SHOT_RESULT: 'olo_shot_result',
 } as const;

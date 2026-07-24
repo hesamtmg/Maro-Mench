@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { GameTypeCode } from '../rooms/entities/game-type.entity';
 import { GameEngine } from './game-engine.interface';
 import { LudoEngine } from './ludo/ludo.engine';
+import { OloEngine } from './olo/olo.engine';
 import { SnakesLaddersEngine } from './snakes-ladders/snakes-ladders.engine';
 
 @Injectable()
@@ -9,6 +10,7 @@ export class GameEngineFactory {
   constructor(
     private readonly ludoEngine: LudoEngine,
     private readonly snakesLaddersEngine: SnakesLaddersEngine,
+    private readonly oloEngine: OloEngine,
   ) {}
 
   getEngine(gameTypeCode: GameTypeCode): GameEngine {
@@ -17,6 +19,8 @@ export class GameEngineFactory {
         return this.ludoEngine;
       case GameTypeCode.SNAKES_LADDERS:
         return this.snakesLaddersEngine;
+      case GameTypeCode.OLO:
+        return this.oloEngine;
       default:
         throw new Error(
           `No game engine registered for ${String(gameTypeCode)}`,

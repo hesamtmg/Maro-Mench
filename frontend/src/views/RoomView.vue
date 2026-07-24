@@ -5,6 +5,7 @@ import { roomsApi } from "../api/rooms.api";
 import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
+import OloBoard from "../components/OloBoard.vue";
 import PlayerList from "../components/PlayerList.vue";
 import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
 import { useMySeat } from "../composables/useMySeat";
@@ -87,6 +88,24 @@ function handleSelectToken(tokenId: number) {
   roomStore.makeMove(props.id, tokenId);
 }
 
+function handleOloLivePositions(payload: {
+  positions: Array<{ id: string; x: number; y: number }>;
+}) {
+  roomStore.sendOloLivePositions(props.id, payload.positions);
+}
+
+function handleOloShotResult(payload: {
+  boardState: unknown;
+  nextTurnSeat: number;
+  isGameOver: boolean;
+  winnerSeat?: number;
+}) {
+  roomStore.sendOloShotResult(props.id, {
+    ...payload,
+    boardState: payload.boardState as Record<string, unknown>,
+  });
+}
+
 async function handleLeaveRoom() {
   roomStore.leaveRoom(props.id);
   await router.push({ name: "lobby" });
@@ -156,6 +175,13 @@ function snakesLaddersPosition(seatIndex: number): number {
     positions?: Record<number, number>;
   } | null;
   return state?.positions?.[seatIndex] ?? 0;
+}
+
+function oloScore(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    scores?: Record<number, number>;
+  } | null;
+  return state?.scores?.[seatIndex] ?? 0;
 }
 
 const myLudoTokens = computed(() => {
@@ -264,20 +290,22 @@ onMounted(() => {
               </span>
             </span>
 
-            <span class="turn-divider" />
+            <template v-if="gameTypeCode !== 'olo'">
+              <span class="turn-divider" />
 
-            <DiceRoller
-              :value="roomStore.lastDiceValue"
-              :is-rolling="roomStore.isRolling"
-            />
-            <button
-              v-if="isMyTurn && !roomStore.awaitingMoveChoice"
-              class="btn btn-primary"
-              :disabled="roomStore.isRolling"
-              @click="handleRollDice"
-            >
-              {{ roomStore.isRolling ? "Rolling…" : "Roll dice" }}
-            </button>
+              <DiceRoller
+                :value="roomStore.lastDiceValue"
+                :is-rolling="roomStore.isRolling"
+              />
+              <button
+                v-if="isMyTurn && !roomStore.awaitingMoveChoice"
+                class="btn btn-primary"
+                :disabled="roomStore.isRolling"
+                @click="handleRollDice"
+              >
+                {{ roomStore.isRolling ? "Rolling…" : "Roll dice" }}
+              </button>
+            </template>
           </div>
         </div>
       </div>
@@ -351,6 +379,9 @@ onMounted(() => {
               <span v-else-if="gameTypeCode === 'snakes_ladders'" class="text-muted">
                 Square {{ snakesLaddersPosition(player.seatIndex) }} / 100
               </span>
+              <span v-else-if="gameTypeCode === 'olo'" class="text-muted">
+                Score: {{ oloScore(player.seatIndex) }}
+              </span>
             </div>
           </div>
 
@@ -388,6 +419,17 @@ onMounted(() => {
             :current-turn-seat="roomStore.currentTurnSeat"
             hide-player-summary
           />
+          <OloBoard
+            v-else-if="gameTypeCode === 'olo'"
+            mode="online"
+            :board-state="roomStore.boardState as any"
+            :players="roomStore.room.players"
+            :current-turn-seat="roomStore.currentTurnSeat"
+            :my-seat-index="myPlayer?.seatIndex ?? null"
+            :live-opponent-positions="roomStore.oloLiveOpponentPositions"
+            @live-positions="handleOloLivePositions"
+            @shot-result="handleOloShotResult"
+          />
         </div>
       </div>
 
@@ -412,6 +454,17 @@ onMounted(() => {
           :board-state="roomStore.boardState as any"
           :players="roomStore.room.players"
           :current-turn-seat="roomStore.currentTurnSeat"
+        />
+        <OloBoard
+          v-else-if="gameTypeCode === 'olo'"
+          mode="online"
+          :board-state="roomStore.boardState as any"
+          :players="roomStore.room.players"
+          :current-turn-seat="roomStore.currentTurnSeat"
+          :my-seat-index="myPlayer?.seatIndex ?? null"
+          :live-opponent-positions="roomStore.oloLiveOpponentPositions"
+          @live-positions="handleOloLivePositions"
+          @shot-result="handleOloShotResult"
         />
 
         <div v-if="roomStore.eventLog.length" class="event-log card">

@@ -8,6 +8,7 @@ export default registerAs('database', (): TypeOrmModuleOptions => ({
   username: process.env.DB_USERNAME,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   autoLoadEntities: true,
   // We use explicit migrations instead of synchronize, even in dev, so
   // the schema in every environment is produced by the same reviewable

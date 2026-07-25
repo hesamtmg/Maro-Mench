@@ -4,8 +4,11 @@ import {
   BOARD,
   GROUP_COLORS,
   HOTEL_LEVEL,
+  backgroundStyleFor,
   iconFor,
+  tierFor,
   tokenIconForSeat,
+  watermarkFor,
 } from "./monopoly/board-config";
 import type { RoomPlayer } from "../types";
 
@@ -385,10 +388,16 @@ function isCorner(index: number): boolean {
         class="ms-cell"
         :class="[
           `type-${space.type}`,
+          tierFor(space) ? `tier-${tierFor(space)}` : '',
           { 'ms-corner': isCorner(space.index), 'ms-mortgaged': mortgagedFor(space.index) },
         ]"
-        :style="[cellStyle(space.index), space.group ? { '--group-color': GROUP_COLORS[space.group] } : {}]"
+        :style="[
+          cellStyle(space.index),
+          space.group ? { '--group-color': GROUP_COLORS[space.group] } : {},
+          backgroundStyleFor(space) ?? {},
+        ]"
       >
+        <div v-if="watermarkFor(space)" class="ms-watermark">{{ watermarkFor(space) }}</div>
         <div v-if="mortgagedFor(space.index)" class="ms-mortgaged-badge">M</div>
         <div v-if="space.group" class="ms-swatch" />
         <div v-if="iconFor(space)" class="ms-icon">{{ iconFor(space) }}</div>
@@ -739,6 +748,29 @@ function isCorner(index: number): boolean {
   background: var(--group-color, transparent);
 }
 
+/* Placeholder tile art. Every space gets a themed gradient + hatch texture
+   (poor -> rich for properties, function-based for special spaces) plus a
+   faint watermark icon, so the board doesn't look bare while real per-tile
+   images are pending. Setting a space's `bgImage` overrides this via the
+   inline background-image style and just sits on top of the same base. */
+.ms-watermark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(1.1rem, 2.6vw, 1.9rem);
+  line-height: 1;
+  opacity: 0.24;
+  pointer-events: none;
+}
+
+.ms-icon,
+.ms-name,
+.ms-price {
+  position: relative;
+}
+
 .ms-icon {
   font-size: clamp(0.6rem, 1.4vw, 0.95rem);
   line-height: 1;
@@ -747,13 +779,71 @@ function isCorner(index: number): boolean {
 .ms-name {
   font-size: clamp(0.4rem, 0.85vw, 0.62rem);
   line-height: 1.1;
-  color: var(--color-text);
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   word-break: break-word;
 }
 
 .ms-price {
   font-size: clamp(0.35rem, 0.75vw, 0.55rem);
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.72);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* Property tiers: poor -> rich */
+.tier-1 {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #5b5148, #3a332b);
+}
+.tier-2 {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #7a5a35, #4f3b1e);
+}
+.tier-3 {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #2f6d7a, #1c434c);
+}
+.tier-4 {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 215, 100, 0.08) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #6b3fa0, #3a2160);
+}
+
+/* Special spaces, themed by function */
+.type-go {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #1f7a4d, #12482e);
+}
+.type-jail {
+  background-image: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 9px),
+    linear-gradient(160deg, #4a4a52, #2a2a30);
+}
+.type-free_parking {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #3a5a40, #21331f);
+}
+.type-go_to_jail {
+  background-image: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0 3px, transparent 3px 9px),
+    linear-gradient(160deg, #7a2530, #430f15);
+}
+.type-chance {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #6a3fa0, #3a1f60);
+}
+.type-chest {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 215, 100, 0.08) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #a08130, #614c14);
+}
+.type-tax {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.05) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #7a2f2f, #431919);
+}
+.type-transit {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #2f4f7a, #182944);
+}
+.type-utility {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.07) 0 4px, transparent 4px 10px),
+    linear-gradient(160deg, #a08a1f, #5f5110);
 }
 
 .ms-corner .ms-name {

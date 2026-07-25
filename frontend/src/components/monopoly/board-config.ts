@@ -23,6 +23,9 @@ export interface MonopolySpace {
   price?: number;
   houseCost?: number;
   taxAmount?: number;
+  // Real artwork path, filled in later. Until then the board renders a
+  // procedural placeholder background instead (see tierFor/watermarkFor).
+  bgImage?: string;
 }
 
 export const GROUP_COLORS: Record<string, string> = {
@@ -101,6 +104,62 @@ export const BOARD: MonopolySpace[] = [
 
 export const JAIL_SPACE_INDEX = 10;
 export const HOTEL_LEVEL = 5;
+
+// Economic tier per property group, poorest (1) to richest (4) -- mirrors
+// the existing house-cost tiers, just relabeled for background theming.
+const TIER_BY_GROUP: Record<string, number> = {
+  A: 1,
+  B: 1,
+  C: 2,
+  D: 2,
+  E: 3,
+  F: 3,
+  G: 4,
+  H: 4,
+};
+
+export function tierFor(space: MonopolySpace): number | null {
+  return space.group ? TIER_BY_GROUP[space.group] ?? null : null;
+}
+
+// Placeholder watermark art, shown until real per-tile images are dropped
+// in via `bgImage`. Tiers run shack -> cottage -> villa -> mansion;
+// non-property spaces get an icon matching their function.
+const TIER_WATERMARKS: Record<number, string> = {
+  1: '🏚️',
+  2: '🏠',
+  3: '🏡',
+  4: '🏰',
+};
+
+const TYPE_WATERMARKS: Partial<Record<MonopolySpaceType, string>> = {
+  go: '🏁',
+  jail: '🔒',
+  transit: '🚆',
+  utility: '⚡',
+  tax: '🧾',
+  chest: '💰',
+  chance: '🌀',
+  free_parking: '🌳',
+  go_to_jail: '🚨',
+};
+
+export function watermarkFor(space: MonopolySpace): string {
+  const tier = tierFor(space);
+  if (tier) return TIER_WATERMARKS[tier];
+  return TYPE_WATERMARKS[space.type] ?? '';
+}
+
+// Once real art exists this is the only thing a tile needs -- backgroundStyleFor
+// falls back to the CSS mock (tier-N / type-X classes) when bgImage is unset.
+export function backgroundStyleFor(space: MonopolySpace): Record<string, string> | undefined {
+  if (!space.bgImage) return undefined;
+  return {
+    backgroundImage: `url(${space.bgImage})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
+}
 
 const SPACE_ICONS: Partial<Record<MonopolySpaceType, string>> = {
   go: '➡️',

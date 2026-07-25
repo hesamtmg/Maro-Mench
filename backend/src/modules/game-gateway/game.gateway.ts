@@ -205,6 +205,7 @@ export class GameGateway
       socket.emit(WS_EVENTS_OUT.GAME_STARTED, {
         boardState: gameState.boardState,
         currentTurnSeat: gameState.currentTurnSeat,
+        isPaused: this.scheduler.isPaused(payload.roomId),
       });
     }
   }
@@ -367,6 +368,66 @@ export class GameGateway
     this.scheduleTurnTimeoutFor(room.id);
   }
 
+  /** Any seated player may pause an in-progress game -- freezes the turn
+   * timer (remembering how much time was left) and blocks every
+   * turn-consuming action until someone resumes it. */
+  @SubscribeMessage(WS_EVENTS_IN.PAUSE_GAME)
+  async onPauseGame(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: RoomIdPayload,
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (!player) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
+      return;
+    }
+    if (room.status !== RoomStatus.IN_PROGRESS) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'The game is not in progress' });
+      return;
+    }
+    if (this.scheduler.isPaused(room.id)) return;
+
+    this.scheduler.pauseRoom(room.id);
+    this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_PAUSED, {
+      seatIndex: player.seatIndex,
+    });
+  }
+
+  @SubscribeMessage(WS_EVENTS_IN.RESUME_GAME)
+  async onResumeGame(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: RoomIdPayload,
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (!player) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
+      return;
+    }
+    if (!this.scheduler.isPaused(room.id)) return;
+
+    const remainingMs = this.scheduler.resumeRoom(room.id, () => {
+      void this.skipCurrentTurn(room.id, 'timeout');
+    });
+    this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_RESUMED, {
+      seatIndex: player.seatIndex,
+      turnDeadline: Date.now() + remainingMs,
+    });
+  }
+
+  /** Guard for every turn-consuming action -- rejects it while the room is paused. */
+  private rejectIfPaused(
+    socket: AuthenticatedSocket,
+    roomId: string,
+  ): boolean {
+    if (this.scheduler.isPaused(roomId)) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'The game is paused' });
+      return true;
+    }
+    return false;
+  }
+
   @SubscribeMessage(WS_EVENTS_IN.ROLL_DICE)
   async onRollDice(
     @ConnectedSocket() socket: AuthenticatedSocket,
@@ -374,6 +435,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -435,6 +497,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -498,6 +561,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -541,6 +605,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -579,6 +644,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -617,6 +683,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -649,6 +716,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -681,6 +749,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -713,6 +782,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -742,6 +812,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -771,6 +842,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     const gameState = await this.gameStateService.getGameState(room.id);
 
     if (!player || player.seatIndex !== gameState.currentTurnSeat) {
@@ -806,6 +878,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     if (!player) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
       return;
@@ -841,6 +914,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     if (!player) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
       return;
@@ -899,6 +973,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     if (!player) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
       return;
@@ -931,6 +1006,7 @@ export class GameGateway
   ) {
     const room = await this.roomsService.findRoomOrThrow(payload.roomId);
     const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
     if (!player) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
       return;

@@ -4,6 +4,8 @@ export const WS_EVENTS_IN = {
   LEAVE_ROOM: 'leave_room', // { roomId }
   PLAYER_READY: 'player_ready', // { roomId }
   START_GAME: 'start_game', // { roomId } (admin only)
+  PAUSE_GAME: 'pause_game', // { roomId } -- any seated player may pause
+  RESUME_GAME: 'resume_game', // { roomId } -- any seated player may resume
   ROLL_DICE: 'roll_dice', // { roomId }
   MAKE_MOVE: 'make_move', // { roomId, tokenId }  (Ludo only, when choice needed)
   KICK_PLAYER: 'kick_player', // { roomId, targetUserId } (admin only)
@@ -45,6 +47,8 @@ export const WS_EVENTS_OUT = {
   PLAYER_DISCONNECTED: 'player_disconnected',
   PLAYER_RECONNECTED: 'player_reconnected',
   GAME_STARTED: 'game_started', // initial board_state
+  GAME_PAUSED: 'game_paused', // { seatIndex } -- who paused it
+  GAME_RESUMED: 'game_resumed', // { seatIndex, turnDeadline } -- who resumed it, and when the turn timer now expires
   DICE_ROLLED: 'dice_rolled', // { seatIndex, diceValue }
   AWAITING_MOVE_CHOICE: 'awaiting_move_choice', // { seatIndex, diceValue, options }
   MOVE_APPLIED: 'move_applied', // { boardState, nextTurnSeat, movePayload }

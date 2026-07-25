@@ -24,7 +24,7 @@ const DEFAULT_GAME_TYPES: Array<Omit<GameType, 'id'>> = [
   },
   {
     code: GameTypeCode.MONOPOLY,
-    name: 'Tycoon',
+    name: 'Monopoly',
     minPlayers: 2,
     maxPlayers: 6,
   },
@@ -49,6 +49,15 @@ export class GameTypesService implements OnModuleInit {
           this.gameTypeRepository.create(gameType),
         );
         this.logger.log(`Seeded game type: ${gameType.code}`);
+      } else if (existing.name !== gameType.name) {
+        // Keeps an already-seeded row's display name in sync with a
+        // later rename here (e.g. Tycoon -> Monopoly) instead of only
+        // ever applying on first insert.
+        existing.name = gameType.name;
+        await this.gameTypeRepository.save(existing);
+        this.logger.log(
+          `Renamed game type ${gameType.code} to "${gameType.name}"`,
+        );
       }
     }
   }

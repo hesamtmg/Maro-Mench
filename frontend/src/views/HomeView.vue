@@ -16,7 +16,7 @@ const slSwatch = Array.from({ length: 16 }, (_, i) => {
   return SL_CELL_COLORS[(row + col) % SL_CELL_COLORS.length];
 });
 
-// Tycoon tile: a strip of property-group colors, echoing the real board's
+// Monopoly tile: a strip of property-group colors, echoing the real board's
 // color groups at a glance.
 const MONOPOLY_CELL_COLORS = [
   '#8b5a2b',
@@ -102,7 +102,7 @@ async function handleLogout() {
             :style="{ background: color }"
           />
         </span>
-        <strong>Tycoon</strong>
+        <strong>Monopoly</strong>
       </button>
     </div>
   </div>
@@ -229,7 +229,7 @@ async function handleLogout() {
   right: 18%;
 }
 
-/* Tycoon tile: a patchwork of the board's property-group colors. */
+/* Monopoly tile: a patchwork of the board's property-group colors. */
 .monopoly-pic {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

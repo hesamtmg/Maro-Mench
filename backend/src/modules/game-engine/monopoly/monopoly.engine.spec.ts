@@ -71,7 +71,7 @@ describe('MonopolyEngine', () => {
   describe('buying property', () => {
     it('offers a pending purchase when landing on an unowned affordable property', () => {
       const state = engine.createInitialState(seats, {});
-      mockDiceOnce(1, 2); // lands on square 3 (Birch Row, $60)
+      mockDiceOnce(1, 2); // lands on square 3 (Khazaneh, $60)
       const result = engine.rollDice(state, seats, 0);
       const after = result.moveResult!.boardState as unknown as MonopolyState;
       expect(after.pendingPurchase).toEqual({ spaceIndex: 3, price: 60 });
@@ -246,7 +246,7 @@ describe('MonopolyEngine', () => {
 
     it('freezes the turn with a pending debt instead of bankrupting immediately', () => {
       const { state, expectedRent } = stateWithUnaffordableRent();
-      mockDiceOnce(1, 1); // doubles: 37 + 2 = 39 (Diamond Heights, owned by seat 1)
+      mockDiceOnce(1, 1); // doubles: 37 + 2 = 39 (Fereshteh, owned by seat 1)
       const result = engine.rollDice(
         state as unknown as Record<string, unknown>,
         seats,
@@ -387,7 +387,7 @@ describe('MonopolyEngine', () => {
   describe('mortgaging', () => {
     it('mortgages a house-free property for half its price', () => {
       const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
-      state.properties[1].ownerSeat = 0; // Elm Row, $60
+      state.properties[1].ownerSeat = 0; // Molavi, $60
       const after = engine.mortgageProperty(
         state as unknown as Record<string, unknown>,
         0,
@@ -611,8 +611,8 @@ describe('MonopolyEngine', () => {
   describe('trading', () => {
     function stateWithOwnedProperties(): MonopolyState {
       const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
-      state.properties[1].ownerSeat = 0; // Elm Row, seat 0
-      state.properties[6].ownerSeat = 1; // Harbor Lane, seat 1
+      state.properties[1].ownerSeat = 0; // Molavi, seat 0
+      state.properties[6].ownerSeat = 1; // Naziabad, seat 1
       return state;
     }
 

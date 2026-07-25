@@ -16,7 +16,7 @@ import {
   playSwallow,
   playVictoryFanfare,
 } from '../lib/game-sounds';
-import { useToastStore } from './toast.store';
+import { useToastStore, type ToastType } from './toast.store';
 import type { Room } from '../types';
 
 // Must match backend/src/modules/game-gateway/room-scheduler.service.ts
@@ -44,6 +44,7 @@ interface MoveAppliedEvent {
 interface GameStartedEvent {
   boardState: Record<string, unknown>;
   currentTurnSeat: number;
+  isPaused?: boolean;
 }
 
 interface GameOverEvent {
@@ -59,6 +60,15 @@ interface TurnSkippedEvent {
 interface PlayerPresenceEvent {
   userId: string;
   seatIndex: number;
+}
+
+interface GamePausedEvent {
+  seatIndex: number;
+}
+
+interface GameResumedEvent {
+  seatIndex: number;
+  turnDeadline: number;
 }
 
 interface OloLivePositionsEvent {
@@ -171,6 +181,16 @@ interface RoomState {
   // lastDiceValue is their *sum* (up to 12), which doesn't fit the
   // 1-6 pip die widget, so Monopoly renders two dice from this instead.
   monopolyDice: [number, number] | null;
+  // Monopoly only: the most recent Chance/Community Chest card drawn, for
+  // MonopolyBoard to show as a full reveal overlay. `id` is a unique
+  // counter (not the card text) so a watcher can detect a fresh draw even
+  // when the same card text comes up twice in a row.
+  lastMonopolyCard: { deck: 'chance' | 'chest'; text: string; id: number } | null;
+  // Any seated player can pause an in-progress game; while paused, every
+  // turn-consuming action is rejected server-side and the turn timer is
+  // frozen (turnDeadline is cleared -- see GAME_PAUSED/GAME_RESUMED below).
+  isPaused: boolean;
+  pausedBySeat: number | null;
 }
 
 // Mirrors monopolyEventMessage's priority order, one sound per outcome.
@@ -236,6 +256,7 @@ function displayNameForSeat(room: Room | null, seatIndex: number): string {
 let celebrationTimer: ReturnType<typeof setTimeout> | undefined;
 
 let nextEventLogId = 1;
+let nextMonopolyCardId = 1;
 
 export const useRoomStore = defineStore('room', {
   state: (): RoomState => ({
@@ -253,10 +274,22 @@ export const useRoomStore = defineStore('room', {
     celebration: null,
     oloLiveOpponentPositions: null,
     monopolyDice: null,
+    lastMonopolyCard: null,
+    isPaused: false,
+    pausedBySeat: null,
   }),
 
   actions: {
-    pushEvent(message: string) {
+    // Every activity-log entry also pops a toast by default, so nothing
+    // that happens in a room goes unnoticed even if the sidebar log isn't
+    // in view. Pass toastType: null to log without toasting (reserved for
+    // entries that would otherwise double up with a toast already shown
+    // elsewhere for the same event).
+    pushEvent(
+      message: string,
+      toastType: ToastType | null = 'info',
+      durationMs?: number,
+    ) {
       this.eventLog.unshift({
         id: nextEventLogId++,
         message,
@@ -264,6 +297,9 @@ export const useRoomStore = defineStore('room', {
       });
       if (this.eventLog.length > EVENT_LOG_LIMIT) {
         this.eventLog.length = EVENT_LOG_LIMIT;
+      }
+      if (toastType) {
+        useToastStore().show(message, toastType, durationMs);
       }
     },
 
@@ -292,9 +328,14 @@ export const useRoomStore = defineStore('room', {
         this.awaitingDiceValue = null;
         this.isRolling = false;
         this.monopolyDice = null;
-        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
-        toastStore.success('The game has started!');
-        this.pushEvent('🎲 The game has started!');
+        this.lastMonopolyCard = null;
+        // Also fires on rejoin/reconnect (see onJoinRoom on the backend),
+        // so a paused room's turn timer must NOT be reset to a fresh 30s
+        // for whoever's rejoining -- respect the server's isPaused flag.
+        this.isPaused = payload.isPaused ?? false;
+        this.pausedBySeat = null;
+        this.turnDeadline = this.isPaused ? null : Date.now() + TURN_TIMEOUT_MS;
+        this.pushEvent('🎲 The game has started!', 'success');
       });
 
       socket.on(WS_EVENTS_OUT.DICE_ROLLED, (payload: DiceRolledEvent) => {
@@ -307,10 +348,26 @@ export const useRoomStore = defineStore('room', {
           this.isRolling = false;
         }, 500);
         const name = displayNameForSeat(this.room, payload.seatIndex);
-        this.pushEvent(`🎲 ${name} rolled a ${payload.diceValue}.`);
+        this.pushEvent(`🎲 ${name} rolled a ${payload.diceValue}.`, 'info', 2500);
         if (payload.diceValue === 6) {
           playHooray();
         }
+      });
+
+      socket.on(WS_EVENTS_OUT.GAME_PAUSED, (payload: GamePausedEvent) => {
+        this.isPaused = true;
+        this.pausedBySeat = payload.seatIndex;
+        this.turnDeadline = null;
+        const name = displayNameForSeat(this.room, payload.seatIndex);
+        this.pushEvent(`⏸️ ${name} paused the game.`, 'info');
+      });
+
+      socket.on(WS_EVENTS_OUT.GAME_RESUMED, (payload: GameResumedEvent) => {
+        this.isPaused = false;
+        this.pausedBySeat = null;
+        this.turnDeadline = payload.turnDeadline;
+        const name = displayNameForSeat(this.room, payload.seatIndex);
+        this.pushEvent(`▶️ ${name} resumed the game.`, 'success');
       });
 
       socket.on(
@@ -357,7 +414,16 @@ export const useRoomStore = defineStore('room', {
           if (die1 != null && die2 != null) {
             this.monopolyDice = [die1, die2];
           }
-          this.pushEvent(monopolyEventMessage(name, movePayload, this.room));
+          const cardText = movePayload.card as string | undefined;
+          const spaceType = movePayload.spaceType as string | undefined;
+          if (cardText && (spaceType === 'chance' || spaceType === 'chest')) {
+            this.lastMonopolyCard = {
+              deck: spaceType,
+              text: cardText,
+              id: nextMonopolyCardId++,
+            };
+          }
+          this.pushEvent(monopolyEventMessage(name, movePayload, this.room), 'info', 2500);
           monopolyEventSound(movePayload);
         } else if (movePayload.noLegalMove) {
           this.pushEvent(`↪️ ${name} had no legal move.`);
@@ -368,7 +434,7 @@ export const useRoomStore = defineStore('room', {
               captured.map((c) => displayNameForSeat(this.room, c.seatIndex)),
             ),
           ].join(', ');
-          this.pushEvent(`💥 ${name} sent ${capturedNames} home!`);
+          this.pushEvent(`💥 ${name} sent ${capturedNames} home!`, 'success');
           playCrash();
           this.triggerCelebration('victory');
         } else if (
@@ -376,7 +442,7 @@ export const useRoomStore = defineStore('room', {
           rawLanding != null &&
           slBoard.snakes?.[rawLanding] !== undefined
         ) {
-          this.pushEvent(`🐍 ${name} got swallowed by a snake!`);
+          this.pushEvent(`🐍 ${name} got swallowed by a snake!`, 'error');
           playSwallow();
           this.triggerCelebration('failure');
         } else if (
@@ -384,11 +450,11 @@ export const useRoomStore = defineStore('room', {
           rawLanding != null &&
           slBoard.ladders?.[rawLanding] !== undefined
         ) {
-          this.pushEvent(`🪜 ${name} climbed a ladder!`);
+          this.pushEvent(`🪜 ${name} climbed a ladder!`, 'success');
           playStairs();
           this.triggerCelebration('victory');
         } else {
-          this.pushEvent(`♟️ ${name} moved.`);
+          this.pushEvent(`♟️ ${name} moved.`, 'info', 2500);
         }
       });
 
@@ -403,8 +469,7 @@ export const useRoomStore = defineStore('room', {
         this.currentTurnSeat = payload.nextTurnSeat;
         this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         const name = displayNameForSeat(this.room, payload.seatIndex);
-        toastStore.info(`${name}'s turn was skipped (${payload.reason}).`);
-        this.pushEvent(`⏭️ ${name}'s turn was skipped (${payload.reason}).`);
+        this.pushEvent(`⏭️ ${name}'s turn was skipped (${payload.reason}).`, 'info');
         playAhh();
       });
 
@@ -416,7 +481,7 @@ export const useRoomStore = defineStore('room', {
           payload.winnerSeat != null
             ? displayNameForSeat(this.room, payload.winnerSeat)
             : null;
-        this.pushEvent(name ? `🏆 ${name} won the game!` : '🏁 Game over.');
+        this.pushEvent(name ? `🏆 ${name} won the game!` : '🏁 Game over.', 'success');
         playVictoryFanfare();
         this.triggerCelebration('victory');
       });
@@ -425,8 +490,7 @@ export const useRoomStore = defineStore('room', {
         WS_EVENTS_OUT.PLAYER_DISCONNECTED,
         (payload: PlayerPresenceEvent) => {
           const name = displayNameForSeat(this.room, payload.seatIndex);
-          toastStore.info(`${name} disconnected.`);
-          this.pushEvent(`🔌 ${name} disconnected.`);
+          this.pushEvent(`🔌 ${name} disconnected.`, 'info');
         },
       );
 
@@ -434,14 +498,12 @@ export const useRoomStore = defineStore('room', {
         WS_EVENTS_OUT.PLAYER_RECONNECTED,
         (payload: PlayerPresenceEvent) => {
           const name = displayNameForSeat(this.room, payload.seatIndex);
-          toastStore.success(`${name} reconnected.`);
-          this.pushEvent(`🔌 ${name} reconnected.`);
+          this.pushEvent(`🔌 ${name} reconnected.`, 'success');
         },
       );
 
       socket.on(WS_EVENTS_OUT.PLAYER_KICKED, () => {
-        toastStore.info('A player was removed from the room.');
-        this.pushEvent('👢 A player was removed from the room.');
+        this.pushEvent('👢 A player was removed from the room.', 'info');
       });
 
       socket.on(WS_EVENTS_OUT.ROOM_DELETED, () => {
@@ -472,7 +534,7 @@ export const useRoomStore = defineStore('room', {
         this.oloLiveOpponentPositions = null;
         this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         const name = displayNameForSeat(this.room, payload.seatIndex);
-        this.pushEvent(`🥏 ${name} took a shot.`);
+        this.pushEvent(`🥏 ${name} took a shot.`, 'info', 2500);
       });
 
       // Monopoly only: building a house or paying the jail fine changes
@@ -484,7 +546,7 @@ export const useRoomStore = defineStore('room', {
           this.boardState = payload.boardState;
           const message = monopolyStateEventMessage(payload, this.room);
           if (message) {
-            this.pushEvent(message);
+            this.pushEvent(message, 'info', 2500);
             monopolyStateEventSound(payload);
           }
         },
@@ -509,6 +571,14 @@ export const useRoomStore = defineStore('room', {
 
     startGame(roomId: string) {
       getSocket().emit(WS_EVENTS_IN.START_GAME, { roomId });
+    },
+
+    pauseGame(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.PAUSE_GAME, { roomId });
+    },
+
+    resumeGame(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.RESUME_GAME, { roomId });
     },
 
     rollDice(roomId: string) {
@@ -629,6 +699,9 @@ export const useRoomStore = defineStore('room', {
       this.celebration = null;
       this.oloLiveOpponentPositions = null;
       this.monopolyDice = null;
+      this.lastMonopolyCard = null;
+      this.isPaused = false;
+      this.pausedBySeat = null;
     },
   },
 });

@@ -262,7 +262,7 @@ onUnmounted(() => {
           <option value="ludo">Ludo </option>
           <option value="snakes_ladders">Snakes &amp; Ladders</option>
           <option value="olo">OLO</option>
-            <option value="monopoly">Tycoon</option>
+            <option value="monopoly">Monopoly</option>
         </select>
         <button class="btn btn-secondary" @click="loadPublicRooms">
           Refresh
@@ -316,7 +316,7 @@ onUnmounted(() => {
               Snakes &amp; Ladders
             </option>
             <option value="olo">OLO</option>
-            <option value="monopoly">Tycoon</option>
+            <option value="monopoly">Monopoly</option>
           </select>
         </div>
 
@@ -386,7 +386,7 @@ onUnmounted(() => {
           <option value="ludo">Ludo </option>
           <option value="snakes_ladders">Snakes &amp; Ladders </option>
           <option value="olo">OLO</option>
-            <option value="monopoly">Tycoon</option>
+            <option value="monopoly">Monopoly</option>
         </select>
       </div>
 

@@ -91,6 +91,14 @@ function handleRollDice() {
   roomStore.rollDice(props.id);
 }
 
+function handlePauseGame() {
+  roomStore.pauseGame(props.id);
+}
+
+function handleResumeGame() {
+  roomStore.resumeGame(props.id);
+}
+
 function handleSelectToken(tokenId: number) {
   roomStore.makeMove(props.id, tokenId);
 }
@@ -470,7 +478,7 @@ onMounted(() => {
               </span>
             </span>
 
-            <template v-if="gameTypeCode !== 'olo'">
+            <template v-if="gameTypeCode !== 'olo' && !roomStore.isPaused">
               <span class="turn-divider" />
 
               <!-- Monopoly rolls two d6s; lastDiceValue is their sum
@@ -501,6 +509,18 @@ onMounted(() => {
                 {{ roomStore.isRolling ? "Rolling…" : "Roll dice" }}
               </button>
             </template>
+
+            <span class="turn-divider" />
+            <button
+              v-if="!roomStore.isPaused"
+              class="btn btn-secondary pause-btn"
+              @click="handlePauseGame"
+            >
+              ⏸ Pause
+            </button>
+            <button v-else class="btn btn-primary pause-btn" @click="handleResumeGame">
+              ▶️ Resume
+            </button>
           </div>
         </div>
       </div>
@@ -546,7 +566,7 @@ onMounted(() => {
             :key="p.seatIndex"
             class="row net-worth-row"
           >
-            <span class="color-dot token-3d">{{ tokenIconForSeat(p.seatIndex) }}</span>
+            <span class="color-dot token-3d"><img :src="tokenIconForSeat(p.seatIndex)" alt="" /></span>
             <strong>{{ p.displayName }}</strong>
             <span class="text-muted"
               >${{ p.worth }}<template v-if="p.bankrupt"> · bankrupt</template></span
@@ -585,8 +605,13 @@ onMounted(() => {
                   class="color-dot"
                   :class="{ 'token-3d': gameTypeCode === 'monopoly' }"
                   :style="gameTypeCode === 'monopoly' ? {} : { background: player.color ?? '#4f46e5' }"
-                  >{{ gameTypeCode === 'monopoly' ? tokenIconForSeat(player.seatIndex) : '' }}</span
                 >
+                  <img
+                    v-if="gameTypeCode === 'monopoly'"
+                    :src="tokenIconForSeat(player.seatIndex)"
+                    alt=""
+                  />
+                </span>
                 <strong>{{ player.displayName }}</strong>
                 <span v-if="gameTypeCode === 'ludo'" class="text-muted">
                   Home: {{ ludoHomeCount(player.seatIndex) }} · Finished:
@@ -705,6 +730,7 @@ onMounted(() => {
             :players="roomStore.room.players"
             :current-turn-seat="roomStore.currentTurnSeat"
             :my-seat-index="myPlayer?.seatIndex ?? null"
+            :last-card="roomStore.lastMonopolyCard"
             hide-player-summary
             @buy-decision="handleMonopolyBuyDecision"
             @build-house="handleMonopolyBuildHouse"
@@ -719,6 +745,15 @@ onMounted(() => {
             @pay-debt="handleMonopolyPayDebt"
             @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
           />
+
+          <div v-if="roomStore.isPaused" class="paused-overlay">
+            <div class="paused-card">
+              <p class="paused-title">⏸ Game Paused</p>
+              <button class="btn btn-primary" @click="handleResumeGame">
+                ▶️ Resume
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -726,6 +761,7 @@ onMounted(() => {
            as it was -- board (with its own built-in player summary),
            then the activity log below it. -->
       <div v-else-if="roomStore.boardState" class="stack">
+        <div class="board-wrap">
         <LudoBoard
           v-if="gameTypeCode === 'ludo'"
           :board-state="roomStore.boardState as any"
@@ -761,6 +797,7 @@ onMounted(() => {
           :players="roomStore.room.players"
           :current-turn-seat="roomStore.currentTurnSeat"
           :my-seat-index="myPlayer?.seatIndex ?? null"
+          :last-card="roomStore.lastMonopolyCard"
           @buy-decision="handleMonopolyBuyDecision"
           @build-house="handleMonopolyBuildHouse"
           @pay-jail-fine="handleMonopolyPayJailFine"
@@ -774,6 +811,16 @@ onMounted(() => {
           @pay-debt="handleMonopolyPayDebt"
           @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
         />
+
+          <div v-if="roomStore.isPaused" class="paused-overlay">
+            <div class="paused-card">
+              <p class="paused-title">⏸ Game Paused</p>
+              <button class="btn btn-primary" @click="handleResumeGame">
+                ▶️ Resume
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div v-if="roomStore.eventLog.length" class="event-log card">
           <h4 class="event-log-title">Activity</h4>
@@ -933,6 +980,48 @@ onMounted(() => {
 .game-board-area {
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+.board-wrap {
+  position: relative;
+}
+
+/* Blocks interaction with the board while paused (the server already
+   rejects every turn-consuming action, but this makes it visually obvious
+   rather than letting clicks silently fail). */
+.paused-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 20, 0.6);
+  backdrop-filter: blur(2px);
+  border-radius: var(--radius);
+  z-index: 5;
+}
+
+.paused-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 2rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.paused-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.pause-btn {
+  white-space: nowrap;
 }
 
 .panel-title {
@@ -951,15 +1040,19 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
   line-height: 1;
   flex-shrink: 0;
 }
 
+.color-dot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 /* Monopoly only (see gameTypeCode checks above) -- a glossy raised-piece
    look instead of a flat color dot, matching MonopolyBoard's own tokens. */
-.token-3d {
-  font-size: 14px;
+.token-3d img {
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
 }
 

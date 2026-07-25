@@ -143,17 +143,17 @@ describe('MonopolyBoard', () => {
     expect(cell.findAll('.ms-token')).toHaveLength(3);
   });
 
-  it("shows an owner dot in the owner's color on an owned property", () => {
+  it("shows an owner dot with the owner's token on an owned property", () => {
     const wrapper = mountBoard({
       properties: {
         ...baseState().properties,
         1: { ownerSeat: 2, houses: 0, mortgaged: false },
       },
     });
-    const cell = wrapper.findAll('.ms-cell')[1]; // Elm Row is board index 1
+    const cell = wrapper.findAll('.ms-cell')[1]; // Molavi is board index 1
     const dot = cell.find('.ms-owner-dot');
     expect(dot.exists()).toBe(true);
-    expect(dot.attributes('style')).toContain('rgb(58, 161, 92)'); // Carol's #3aa15c
+    expect(dot.find('img').exists()).toBe(true);
   });
 
   it('shows a house count and a hotel icon distinctly in the center Buildings list', () => {
@@ -166,8 +166,10 @@ describe('MonopolyBoard', () => {
     });
     const items = wrapper.findAll('.ms-buildings .ms-owned-item');
     expect(items).toHaveLength(2);
-    expect(items[0].find('.ms-owned-houses').text()).toBe('🏠🏠🏠');
-    expect(items[1].find('.ms-owned-houses').text()).toBe('🏨');
+    expect(items[0].findAll('.ms-building:not(.ms-building-hotel)')).toHaveLength(3);
+    expect(items[0].findAll('.ms-building-hotel')).toHaveLength(0);
+    expect(items[1].findAll('.ms-building-hotel')).toHaveLength(1);
+    expect(items[1].findAll('.ms-building:not(.ms-building-hotel)')).toHaveLength(0);
   });
 
   it('marks a mortgaged property with the dimmed class and an "M" badge', () => {
@@ -304,8 +306,8 @@ describe('MonopolyBoard', () => {
         {
           properties: {
             ...baseState().properties,
-            1: { ownerSeat: 1, houses: 0, mortgaged: false }, // Bob owns Elm Row
-            6: { ownerSeat: 2, houses: 0, mortgaged: false }, // Carol owns Harbor Lane
+            1: { ownerSeat: 1, houses: 0, mortgaged: false }, // Bob owns Molavi
+            6: { ownerSeat: 2, houses: 0, mortgaged: false }, // Carol owns Naziabad
           },
         },
         { mySeatIndex: 0 },
@@ -316,7 +318,7 @@ describe('MonopolyBoard', () => {
         ?.trigger('click');
       await wrapper.find('select').setValue('1'); // target Bob
       const labels = wrapper.findAll('.ms-trade-props')[1].findAll('label').map((l) => l.text());
-      expect(labels).toEqual(['Elm Row']);
+      expect(labels).toEqual(['Molavi']);
     });
 
     it('shows incoming trade offers with Accept for the recipient and Cancel for the proposer', () => {

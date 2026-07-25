@@ -351,6 +351,39 @@ function mortgagedFor(spaceIndex: number): boolean {
   return state.value?.properties?.[spaceIndex]?.mortgaged ?? false;
 }
 
+// --- Player status detail (owned properties, jail state, net worth) ---
+
+const expandedSeat = ref<number | null>(null);
+
+function toggleExpand(seatIndex: number) {
+  expandedSeat.value = expandedSeat.value === seatIndex ? null : seatIndex;
+}
+
+function jailFreeCardsFor(seatIndex: number): number {
+  return state.value?.players?.[seatIndex]?.jailFreeCards ?? 0;
+}
+
+function ownedPropertiesFor(seatIndex: number) {
+  return BOARD.filter((space) => ownedSpaceTypes.has(space.type) && ownerSeatFor(space.index) === seatIndex).map(
+    (space) => ({
+      space,
+      houses: housesFor(space.index),
+      mortgaged: mortgagedFor(space.index),
+    })
+  );
+}
+
+function propertyValueFor(seatIndex: number): number {
+  return ownedPropertiesFor(seatIndex).reduce((total, { space, houses, mortgaged }) => {
+    if (mortgaged) return total + Math.floor((space.price ?? 0) / 2);
+    return total + (space.price ?? 0) + houses * (space.houseCost ?? 0);
+  }, 0);
+}
+
+function netWorthFor(seatIndex: number): number {
+  return cashFor(seatIndex) + propertyValueFor(seatIndex);
+}
+
 function playersOn(spaceIndex: number): RoomPlayer[] {
   const s = state.value;
   if (!s) return [];
@@ -423,17 +456,64 @@ function isCorner(index: number): boolean {
 
       <div class="ms-center">
         <div v-if="!hidePlayerSummary" class="ms-players">
-          <div
-            v-for="p in players"
-            :key="p.userId"
-            class="ms-player-row"
-            :class="{ 'ms-player-active': p.seatIndex === currentTurnSeat }"
-          >
-            <span class="color-dot">{{ tokenIconForSeat(p.seatIndex) }}</span>
-            <strong>{{ p.displayName }}</strong>
-            <span class="text-muted">${{ cashFor(p.seatIndex) }}</span>
-            <span v-if="bankruptFor(p.seatIndex)" class="text-muted">💸</span>
-            <span v-else-if="inJailFor(p.seatIndex)" class="text-muted">🚔</span>
+          <div v-for="p in players" :key="p.userId" class="ms-player-block">
+            <div
+              class="ms-player-row"
+              :class="{ 'ms-player-active': p.seatIndex === currentTurnSeat }"
+              role="button"
+              tabindex="0"
+              @click="toggleExpand(p.seatIndex)"
+              @keydown.enter="toggleExpand(p.seatIndex)"
+            >
+              <span class="color-dot">{{ tokenIconForSeat(p.seatIndex) }}</span>
+              <strong>{{ p.displayName }}</strong>
+              <span class="text-muted">${{ cashFor(p.seatIndex) }}</span>
+              <span v-if="bankruptFor(p.seatIndex)" class="text-muted">💸</span>
+              <span v-else-if="inJailFor(p.seatIndex)" class="text-muted">🚔</span>
+              <span class="ms-expand-caret">{{ expandedSeat === p.seatIndex ? '▲' : '▼' }}</span>
+            </div>
+
+            <div v-if="expandedSeat === p.seatIndex" class="ms-player-detail">
+              <div class="ms-detail-stats">
+                <span>💵 ${{ cashFor(p.seatIndex) }}</span>
+                <span>📊 Net worth: ${{ netWorthFor(p.seatIndex) }}</span>
+                <span>
+                  🪪
+                  {{
+                    bankruptFor(p.seatIndex)
+                      ? "Bankrupt"
+                      : inJailFor(p.seatIndex)
+                        ? "In jail"
+                        : "Free"
+                  }}
+                </span>
+                <span v-if="jailFreeCardsFor(p.seatIndex) > 0">
+                  🎟️ {{ jailFreeCardsFor(p.seatIndex) }}x Get Out of Jail Free
+                </span>
+              </div>
+
+              <p v-if="!ownedPropertiesFor(p.seatIndex).length" class="text-muted ms-no-properties">
+                Owns no properties yet.
+              </p>
+              <ul v-else class="ms-owned-list">
+                <li
+                  v-for="{ space, houses, mortgaged } in ownedPropertiesFor(p.seatIndex)"
+                  :key="space.index"
+                  class="ms-owned-item"
+                >
+                  <span
+                    v-if="space.group"
+                    class="ms-owned-swatch"
+                    :style="{ background: GROUP_COLORS[space.group] }"
+                  />
+                  <span class="ms-owned-name">{{ space.name }}</span>
+                  <span v-if="houses > 0" class="ms-owned-houses">
+                    {{ houses >= HOTEL_LEVEL ? '🏨' : '🏠'.repeat(houses) }}
+                  </span>
+                  <span v-if="mortgaged" class="ms-owned-mortgaged">Mortgaged</span>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
 
@@ -920,6 +1000,11 @@ function isCorner(index: number): boolean {
   gap: 0.3rem;
 }
 
+.ms-player-block {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
 .ms-player-row {
   display: flex;
   align-items: center;
@@ -927,10 +1012,74 @@ function isCorner(index: number): boolean {
   padding: 0.2rem 0.4rem;
   border-radius: var(--radius);
   font-size: 0.8rem;
+  cursor: pointer;
 }
 
 .ms-player-active {
   background: rgba(147, 51, 234, 0.18);
+}
+
+.ms-expand-caret {
+  margin-left: auto;
+  font-size: 0.6rem;
+  color: var(--color-text-muted);
+}
+
+.ms-player-detail {
+  padding: 0.4rem 0.5rem 0.6rem 1.8rem;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ms-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.ms-no-properties {
+  margin: 0;
+}
+
+.ms-owned-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ms-owned-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ms-owned-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.ms-owned-name {
+  flex: 1;
+}
+
+.ms-owned-houses {
+  font-size: 0.7rem;
+}
+
+.ms-owned-mortgaged {
+  font-size: 0.65rem;
+  color: #f87171;
+  border: 1px solid #f87171;
+  border-radius: 3px;
+  padding: 0 3px;
 }
 
 .color-dot {

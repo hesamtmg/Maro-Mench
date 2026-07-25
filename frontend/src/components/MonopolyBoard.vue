@@ -19,6 +19,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   "buy-decision": [buy: boolean];
   "build-house": [spaceIndex: number];
+  "sell-house": [spaceIndex: number];
+  "mortgage": [spaceIndex: number];
+  "unmortgage": [spaceIndex: number];
   "pay-jail-fine": [];
   "place-bid": [amount: number];
   "pass-auction": [];
@@ -113,6 +116,52 @@ const buildableProperties = computed(() => {
       (o) => o.type === "property" && o.group === space.group
     );
     return siblings.every((o) => s.properties?.[o.index]?.ownerSeat === seat);
+  });
+});
+
+function mortgageValueFor(price: number | undefined): number {
+  return Math.floor((price ?? 0) / 2);
+}
+
+function unmortgageCostFor(price: number | undefined): number {
+  const value = mortgageValueFor(price);
+  return value + Math.ceil(value * 0.1);
+}
+
+const ownedSpaceTypes = new Set(["property", "transit", "utility"]);
+
+const sellableProperties = computed(() => {
+  const s = state.value;
+  const seat = props.mySeatIndex;
+  if (!s || seat == null) return [];
+  return BOARD.filter((space) => space.type === "property").filter((space) => {
+    const prop = s.properties?.[space.index];
+    if (!prop || prop.ownerSeat !== seat || (prop.houses ?? 0) <= 0) return false;
+    const siblings = BOARD.filter(
+      (o) => o.type === "property" && o.group === space.group
+    );
+    const maxHouses = Math.max(...siblings.map((o) => s.properties?.[o.index]?.houses ?? 0));
+    return prop.houses >= maxHouses;
+  });
+});
+
+const mortgageableProperties = computed(() => {
+  const s = state.value;
+  const seat = props.mySeatIndex;
+  if (!s || seat == null) return [];
+  return BOARD.filter((space) => ownedSpaceTypes.has(space.type)).filter((space) => {
+    const prop = s.properties?.[space.index];
+    return prop && prop.ownerSeat === seat && !prop.mortgaged && (prop.houses ?? 0) === 0;
+  });
+});
+
+const mortgagedProperties = computed(() => {
+  const s = state.value;
+  const seat = props.mySeatIndex;
+  if (!s || seat == null) return [];
+  return BOARD.filter((space) => ownedSpaceTypes.has(space.type)).filter((space) => {
+    const prop = s.properties?.[space.index];
+    return prop && prop.ownerSeat === seat && prop.mortgaged;
   });
 });
 
@@ -258,6 +307,10 @@ function housesFor(spaceIndex: number): number {
   return state.value?.properties?.[spaceIndex]?.houses ?? 0;
 }
 
+function mortgagedFor(spaceIndex: number): boolean {
+  return state.value?.properties?.[spaceIndex]?.mortgaged ?? false;
+}
+
 function playersOn(spaceIndex: number): RoomPlayer[] {
   const s = state.value;
   if (!s) return [];
@@ -293,9 +346,13 @@ function isCorner(index: number): boolean {
         v-for="space in BOARD"
         :key="space.index"
         class="ms-cell"
-        :class="[`type-${space.type}`, { 'ms-corner': isCorner(space.index) }]"
+        :class="[
+          `type-${space.type}`,
+          { 'ms-corner': isCorner(space.index), 'ms-mortgaged': mortgagedFor(space.index) },
+        ]"
         :style="[cellStyle(space.index), space.group ? { '--group-color': GROUP_COLORS[space.group] } : {}]"
       >
+        <div v-if="mortgagedFor(space.index)" class="ms-mortgaged-badge">M</div>
         <div v-if="space.group" class="ms-swatch" />
         <div v-if="iconFor(space)" class="ms-icon">{{ iconFor(space) }}</div>
         <div class="ms-name">{{ space.name }}</div>
@@ -403,6 +460,57 @@ function isCorner(index: number): boolean {
               @click="$emit('build-house', space.index)"
             >
               {{ space.name }} (${{ space.houseCost }})
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="isMyTurn && !pendingPurchase && !auction && sellableProperties.length"
+          class="ms-action card"
+        >
+          <p class="text-muted">Sell a house:</p>
+          <div class="ms-build-list">
+            <button
+              v-for="space in sellableProperties"
+              :key="space.index"
+              class="btn btn-secondary ms-build-btn"
+              @click="$emit('sell-house', space.index)"
+            >
+              {{ space.name }} (+${{ Math.floor((space.houseCost ?? 0) / 2) }})
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="isMyTurn && !pendingPurchase && !auction && mortgageableProperties.length"
+          class="ms-action card"
+        >
+          <p class="text-muted">Mortgage for cash:</p>
+          <div class="ms-build-list">
+            <button
+              v-for="space in mortgageableProperties"
+              :key="space.index"
+              class="btn btn-secondary ms-build-btn"
+              @click="$emit('mortgage', space.index)"
+            >
+              {{ space.name }} (+${{ mortgageValueFor(space.price) }})
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="isMyTurn && !pendingPurchase && !auction && mortgagedProperties.length"
+          class="ms-action card"
+        >
+          <p class="text-muted">Pay off a mortgage:</p>
+          <div class="ms-build-list">
+            <button
+              v-for="space in mortgagedProperties"
+              :key="space.index"
+              class="btn btn-secondary ms-build-btn"
+              @click="$emit('unmortgage', space.index)"
+            >
+              {{ space.name }} (-${{ unmortgageCostFor(space.price) }})
             </button>
           </div>
         </div>
@@ -603,6 +711,23 @@ function isCorner(index: number): boolean {
 .ms-houses {
   font-size: clamp(0.4rem, 0.9vw, 0.6rem);
   line-height: 1;
+}
+
+.ms-mortgaged {
+  opacity: 0.5;
+}
+
+.ms-mortgaged-badge {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #f87171;
+  border: 1px solid #f87171;
+  border-radius: 3px;
+  padding: 0 2px;
+  line-height: 1.2;
 }
 
 .ms-tokens {

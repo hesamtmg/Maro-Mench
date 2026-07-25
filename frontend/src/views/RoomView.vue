@@ -6,6 +6,7 @@ import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
 import MonopolyBoard from "../components/MonopolyBoard.vue";
+import { BOARD as MONOPOLY_BOARD } from "../components/monopoly/board-config";
 import OloBoard from "../components/OloBoard.vue";
 import PlayerList from "../components/PlayerList.vue";
 import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
@@ -127,6 +128,18 @@ function handleMonopolyPassAuction() {
   roomStore.monopolyPassAuction(props.id);
 }
 
+function handleMonopolySellHouse(spaceIndex: number) {
+  roomStore.monopolySellHouse(props.id, spaceIndex);
+}
+
+function handleMonopolyMortgage(spaceIndex: number) {
+  roomStore.monopolyMortgage(props.id, spaceIndex);
+}
+
+function handleMonopolyUnmortgage(spaceIndex: number) {
+  roomStore.monopolyUnmortgage(props.id, spaceIndex);
+}
+
 function handleMonopolyProposeTrade(offer: {
   toSeat: number;
   offerCash: number;
@@ -227,6 +240,40 @@ function monopolyCash(seatIndex: number): number {
   } | null;
   return state?.players?.[seatIndex]?.cash ?? 0;
 }
+
+// Net worth for the game-over summary: cash plus each owned property's
+// value (mortgaged properties count at their half-price liquidation
+// value, since that's what they'd actually convert back to in cash).
+interface MonopolyNetWorthState {
+  players?: Record<number, { cash: number; bankrupt: boolean }>;
+  properties?: Record<number, { ownerSeat: number | null; houses: number; mortgaged: boolean }>;
+}
+
+const monopolyNetWorth = computed(() => {
+  if (gameTypeCode.value !== "monopoly" || !roomStore.room) return [];
+  const state = roomStore.boardState as MonopolyNetWorthState | null;
+  if (!state) return [];
+
+  return roomStore.room.players
+    .map((p) => {
+      let worth = state.players?.[p.seatIndex]?.cash ?? 0;
+      for (const space of MONOPOLY_BOARD) {
+        const prop = state.properties?.[space.index];
+        if (!prop || prop.ownerSeat !== p.seatIndex) continue;
+        worth += prop.mortgaged
+          ? Math.floor((space.price ?? 0) / 2)
+          : (space.price ?? 0) + prop.houses * (space.houseCost ?? 0);
+      }
+      return {
+        seatIndex: p.seatIndex,
+        displayName: p.displayName,
+        color: p.color,
+        worth,
+        bankrupt: state.players?.[p.seatIndex]?.bankrupt ?? false,
+      };
+    })
+    .sort((a, b) => b.worth - a.worth);
+});
 
 function monopolyBankrupt(seatIndex: number): boolean {
   const state = roomStore.boardState as {
@@ -344,7 +391,22 @@ onMounted(() => {
             <template v-if="gameTypeCode !== 'olo'">
               <span class="turn-divider" />
 
+              <!-- Monopoly rolls two d6s; lastDiceValue is their sum
+                   (up to 12), which doesn't fit the single 1-6 pip die,
+                   so it gets two dice from the individually-tracked
+                   values instead. -->
+              <template v-if="gameTypeCode === 'monopoly'">
+                <DiceRoller
+                  :value="roomStore.monopolyDice?.[0] ?? null"
+                  :is-rolling="roomStore.isRolling"
+                />
+                <DiceRoller
+                  :value="roomStore.monopolyDice?.[1] ?? null"
+                  :is-rolling="roomStore.isRolling"
+                />
+              </template>
               <DiceRoller
+                v-else
                 :value="roomStore.lastDiceValue"
                 :is-rolling="roomStore.isRolling"
               />
@@ -395,6 +457,21 @@ onMounted(() => {
         class="card text-center"
       >
         <h2>🎉 {{ winnerName }} wins!</h2>
+
+        <div v-if="monopolyNetWorth.length" class="net-worth-list">
+          <div
+            v-for="p in monopolyNetWorth"
+            :key="p.seatIndex"
+            class="row net-worth-row"
+          >
+            <span class="color-dot" :style="{ background: p.color ?? '#4f46e5' }" />
+            <strong>{{ p.displayName }}</strong>
+            <span class="text-muted"
+              >${{ p.worth }}<template v-if="p.bankrupt"> · bankrupt</template></span
+            >
+          </div>
+        </div>
+
         <button class="btn btn-primary" @click="handleLeaveRoom">
           Back to lobby
         </button>
@@ -499,6 +576,9 @@ onMounted(() => {
             @pass-auction="handleMonopolyPassAuction"
             @propose-trade="handleMonopolyProposeTrade"
             @respond-trade="handleMonopolyRespondTrade"
+            @sell-house="handleMonopolySellHouse"
+            @mortgage="handleMonopolyMortgage"
+            @unmortgage="handleMonopolyUnmortgage"
           />
         </div>
       </div>
@@ -549,6 +629,9 @@ onMounted(() => {
           @pass-auction="handleMonopolyPassAuction"
           @propose-trade="handleMonopolyProposeTrade"
           @respond-trade="handleMonopolyRespondTrade"
+          @sell-house="handleMonopolySellHouse"
+          @mortgage="handleMonopolyMortgage"
+          @unmortgage="handleMonopolyUnmortgage"
         />
 
         <div v-if="roomStore.eventLog.length" class="event-log card">
@@ -735,6 +818,19 @@ onMounted(() => {
 
 .player-row-active {
   background: rgba(147, 51, 234, 0.18);
+}
+
+.net-worth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 320px;
+  margin: 1rem auto 1.5rem;
+}
+
+.net-worth-row {
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .event-log {

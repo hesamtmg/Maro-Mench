@@ -105,6 +105,10 @@ interface RoomState {
   // whichever player is mid-shot, for OloBoard to render while spectating
   // (not persisted -- overwritten by each new packet).
   oloLiveOpponentPositions: OloLivePositionsEvent | null;
+  // Monopoly only: the two individual d6 values from the last roll --
+  // lastDiceValue is their *sum* (up to 12), which doesn't fit the
+  // 1-6 pip die widget, so Monopoly renders two dice from this instead.
+  monopolyDice: [number, number] | null;
 }
 
 function monopolyEventMessage(
@@ -163,6 +167,7 @@ export const useRoomStore = defineStore('room', {
     eventLog: [],
     celebration: null,
     oloLiveOpponentPositions: null,
+    monopolyDice: null,
   }),
 
   actions: {
@@ -201,6 +206,7 @@ export const useRoomStore = defineStore('room', {
         this.awaitingMoveChoice = false;
         this.awaitingDiceValue = null;
         this.isRolling = false;
+        this.monopolyDice = null;
         this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         toastStore.success('The game has started!');
         this.pushEvent('🎲 The game has started!');
@@ -261,6 +267,11 @@ export const useRoomStore = defineStore('room', {
         const isMonopoly = this.room?.gameType.code === 'monopoly';
 
         if (isMonopoly) {
+          const die1 = movePayload.die1 as number | undefined;
+          const die2 = movePayload.die2 as number | undefined;
+          if (die1 != null && die2 != null) {
+            this.monopolyDice = [die1, die2];
+          }
           this.pushEvent(monopolyEventMessage(name, movePayload, this.room));
           if (movePayload.wentBankrupt || movePayload.rentPaid) playCrash();
         } else if (movePayload.noLegalMove) {
@@ -477,6 +488,18 @@ export const useRoomStore = defineStore('room', {
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_RESPOND_TRADE, { roomId, tradeId, accept });
     },
 
+    monopolyMortgage(roomId: string, spaceIndex: number) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_MORTGAGE, { roomId, spaceIndex });
+    },
+
+    monopolyUnmortgage(roomId: string, spaceIndex: number) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_UNMORTGAGE, { roomId, spaceIndex });
+    },
+
+    monopolySellHouse(roomId: string, spaceIndex: number) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_SELL_HOUSE, { roomId, spaceIndex });
+    },
+
     kickPlayer(roomId: string, targetUserId: string) {
       getSocket().emit(WS_EVENTS_IN.KICK_PLAYER, { roomId, targetUserId });
     },
@@ -499,6 +522,7 @@ export const useRoomStore = defineStore('room', {
       if (celebrationTimer) clearTimeout(celebrationTimer);
       this.celebration = null;
       this.oloLiveOpponentPositions = null;
+      this.monopolyDice = null;
     },
   },
 });

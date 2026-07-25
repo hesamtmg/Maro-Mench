@@ -590,6 +590,96 @@ export class GameGateway
     }
   }
 
+  /** Monopoly-only: sells one house/hotel level back to the bank. Doesn't consume the turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_SELL_HOUSE)
+  async onMonopolySellHouse(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; spaceIndex: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.monopolyEngine.sellHouse(
+        gameState.boardState,
+        player.seatIndex,
+        payload.spaceIndex,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server
+        .to(room.id)
+        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Monopoly-only: mortgages an owned property for half its price. Doesn't consume the turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_MORTGAGE)
+  async onMonopolyMortgage(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; spaceIndex: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.monopolyEngine.mortgageProperty(
+        gameState.boardState,
+        player.seatIndex,
+        payload.spaceIndex,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server
+        .to(room.id)
+        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Monopoly-only: pays off a mortgaged property (value + 10% interest). Doesn't consume the turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_UNMORTGAGE)
+  async onMonopolyUnmortgage(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; spaceIndex: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.monopolyEngine.unmortgageProperty(
+        gameState.boardState,
+        player.seatIndex,
+        payload.spaceIndex,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server
+        .to(room.id)
+        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   /** Monopoly-only: pays the jail fine (or spends a get-out-of-jail card). Doesn't consume the turn. */
   @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE)
   async onMonopolyPayJailFine(

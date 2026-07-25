@@ -297,6 +297,118 @@ describe('MonopolyEngine', () => {
     });
   });
 
+  describe('mortgaging', () => {
+    it('mortgages a house-free property for half its price', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[1].ownerSeat = 0; // Elm Row, $60
+      const after = engine.mortgageProperty(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+      ) as unknown as MonopolyState;
+      expect(after.properties[1].mortgaged).toBe(true);
+      expect(after.players[0].cash).toBe(STARTING_CASH + 30);
+    });
+
+    it('rejects mortgaging a property with houses on it', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[1].ownerSeat = 0;
+      state.properties[1].houses = 1;
+      expect(() =>
+        engine.mortgageProperty(state as unknown as Record<string, unknown>, 0, 1),
+      ).toThrow('Sell the houses on this property before mortgaging it.');
+    });
+
+    it('rejects mortgaging a property you do not own', () => {
+      const state = engine.createInitialState(seats, {});
+      expect(() =>
+        engine.mortgageProperty(state as unknown as Record<string, unknown>, 0, 1),
+      ).toThrow('You do not own this property.');
+    });
+
+    it('unmortgages a property for the mortgage value plus 10% interest', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[1].ownerSeat = 0;
+      state.properties[1].mortgaged = true;
+      const after = engine.unmortgageProperty(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+      ) as unknown as MonopolyState;
+      expect(after.properties[1].mortgaged).toBe(false);
+      // mortgageValue = 30, +10% interest (rounded up) = 3 -> 33 total.
+      expect(after.players[0].cash).toBe(STARTING_CASH - 33);
+    });
+
+    it('rejects unmortgaging without enough cash', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[1].ownerSeat = 0;
+      state.properties[1].mortgaged = true;
+      state.players[0].cash = 10;
+      expect(() =>
+        engine.unmortgageProperty(state as unknown as Record<string, unknown>, 0, 1),
+      ).toThrow('Not enough cash to unmortgage.');
+    });
+
+    it('charges no rent on a mortgaged property', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[3].ownerSeat = 1;
+      state.properties[3].mortgaged = true;
+      mockDiceOnce(1, 2); // seat 0 lands on square 3
+      const result = engine.rollDice(
+        state as unknown as Record<string, unknown>,
+        seats,
+        0,
+      );
+      const after = result.moveResult!.boardState as unknown as MonopolyState;
+      expect(after.players[0].cash).toBe(STARTING_CASH);
+      expect(after.players[1].cash).toBe(STARTING_CASH);
+    });
+  });
+
+  describe('selling houses', () => {
+    function stateWithHousesOnGroupA(houses1: number, houses3: number): MonopolyState {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[1].ownerSeat = 0;
+      state.properties[3].ownerSeat = 0;
+      state.properties[1].houses = houses1;
+      state.properties[3].houses = houses3;
+      return state;
+    }
+
+    it('sells a house for half its cost', () => {
+      const state = stateWithHousesOnGroupA(1, 1);
+      const after = engine.sellHouse(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+      ) as unknown as MonopolyState;
+      expect(after.properties[1].houses).toBe(0);
+      expect(after.players[0].cash).toBe(STARTING_CASH + 25); // houseCost 50 / 2
+    });
+
+    it('rejects selling from a property with nothing built', () => {
+      const state = stateWithHousesOnGroupA(0, 1);
+      expect(() =>
+        engine.sellHouse(state as unknown as Record<string, unknown>, 0, 1),
+      ).toThrow('There is nothing built here to sell.');
+    });
+
+    it('enforces even selling across the group', () => {
+      const state = stateWithHousesOnGroupA(1, 2);
+      expect(() =>
+        engine.sellHouse(state as unknown as Record<string, unknown>, 0, 1),
+      ).toThrow('Sell evenly across the color group first.');
+      // Selling from the property with the most houses is fine.
+      const after = engine.sellHouse(
+        state as unknown as Record<string, unknown>,
+        0,
+        3,
+      ) as unknown as MonopolyState;
+      expect(after.properties[3].houses).toBe(1);
+    });
+  });
+
   describe('auctions', () => {
     it('starts an auction directly when the landing player cannot afford the property', () => {
       const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;

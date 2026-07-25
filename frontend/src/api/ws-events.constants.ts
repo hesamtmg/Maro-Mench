@@ -22,6 +22,9 @@ export const WS_EVENTS_IN = {
   MONOPOLY_PASS_AUCTION: 'monopoly_pass_auction',
   MONOPOLY_PROPOSE_TRADE: 'monopoly_propose_trade',
   MONOPOLY_RESPOND_TRADE: 'monopoly_respond_trade',
+  MONOPOLY_MORTGAGE: 'monopoly_mortgage',
+  MONOPOLY_UNMORTGAGE: 'monopoly_unmortgage',
+  MONOPOLY_SELL_HOUSE: 'monopoly_sell_house',
 } as const;
 
 export const WS_EVENTS_OUT = {

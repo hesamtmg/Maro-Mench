@@ -27,6 +27,9 @@ export const WS_EVENTS_IN = {
   MONOPOLY_PASS_AUCTION: 'monopoly_pass_auction', // { roomId }
   MONOPOLY_PROPOSE_TRADE: 'monopoly_propose_trade', // { roomId, toSeat, offerCash, offerProperties, offerJailCards, requestCash, requestProperties, requestJailCards }
   MONOPOLY_RESPOND_TRADE: 'monopoly_respond_trade', // { roomId, tradeId, accept }
+  MONOPOLY_MORTGAGE: 'monopoly_mortgage', // { roomId, spaceIndex }
+  MONOPOLY_UNMORTGAGE: 'monopoly_unmortgage', // { roomId, spaceIndex }
+  MONOPOLY_SELL_HOUSE: 'monopoly_sell_house', // { roomId, spaceIndex }
 } as const;
 
 // Server -> Client events

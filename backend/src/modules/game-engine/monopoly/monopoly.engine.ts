@@ -109,6 +109,15 @@ function ownedGroupCount(
   ).length;
 }
 
+function mortgageValue(space: (typeof BOARD)[number]): number {
+  return Math.floor((space.price ?? 0) / 2);
+}
+
+function unmortgageCost(space: (typeof BOARD)[number]): number {
+  const value = mortgageValue(space);
+  return value + Math.ceil(value * 0.1);
+}
+
 function computeRent(state: MonopolyState, spaceIndex: number): number {
   const space = BOARD[spaceIndex];
   const propState = state.properties[spaceIndex];
@@ -479,6 +488,89 @@ export class MonopolyEngine implements GameEngine {
     }
     player.inJail = false;
     player.jailTurns = 0;
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /** Called by the gateway when a player mortgages an owned, house-free property for half its price. */
+  mortgageProperty(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    spaceIndex: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const space = BOARD[spaceIndex];
+    const propState = state.properties[spaceIndex];
+    if (!space || !propState) throw new Error('Not a mortgageable space.');
+    if (propState.ownerSeat !== seatIndex) {
+      throw new Error('You do not own this property.');
+    }
+    if (propState.mortgaged) throw new Error('Already mortgaged.');
+    if (propState.houses > 0) {
+      throw new Error('Sell the houses on this property before mortgaging it.');
+    }
+
+    propState.mortgaged = true;
+    state.players[seatIndex].cash += mortgageValue(space);
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /** Called by the gateway when a player pays off a mortgaged property (value + 10% interest). */
+  unmortgageProperty(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    spaceIndex: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const space = BOARD[spaceIndex];
+    const propState = state.properties[spaceIndex];
+    if (!space || !propState) throw new Error('Not a mortgageable space.');
+    if (propState.ownerSeat !== seatIndex) {
+      throw new Error('You do not own this property.');
+    }
+    if (!propState.mortgaged) throw new Error('This property is not mortgaged.');
+
+    const cost = unmortgageCost(space);
+    const player = state.players[seatIndex];
+    if (player.cash < cost) throw new Error('Not enough cash to unmortgage.');
+
+    player.cash -= cost;
+    propState.mortgaged = false;
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /** Called by the gateway when a player sells one house/hotel level back to the bank for half its cost. */
+  sellHouse(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    spaceIndex: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const space = BOARD[spaceIndex];
+    if (!space || space.type !== 'property') {
+      throw new Error('Not a sellable property.');
+    }
+    const propState = state.properties[spaceIndex];
+    if (propState.ownerSeat !== seatIndex) {
+      throw new Error('You do not own this property.');
+    }
+    if (propState.houses <= 0) throw new Error('There is nothing built here to sell.');
+
+    // Even-sell rule (the reverse of even-build): you can only sell from
+    // whichever property in the group currently has the most houses, so
+    // the group stays as balanced coming down as it was going up.
+    const siblings = groupSpaces(space.group!);
+    const maxHouses = Math.max(
+      ...siblings.map((s) => state.properties[s.index].houses),
+    );
+    if (propState.houses < maxHouses) {
+      throw new Error('Sell evenly across the color group first.');
+    }
+
+    propState.houses -= 1;
+    state.players[seatIndex].cash += Math.floor((space.houseCost ?? 0) / 2);
 
     return state as unknown as Record<string, unknown>;
   }

@@ -95,7 +95,7 @@ describe('MonopolyEngine', () => {
       expect(decision.nextTurnSeat).toBe(1);
     });
 
-    it('declining leaves the property unowned and still advances the turn', () => {
+    it('declining leaves the property unowned and starts an auction instead of ending the turn', () => {
       const state = engine.createInitialState(seats, {});
       mockDiceOnce(1, 2);
       const rolled = engine.rollDice(state, seats, 0);
@@ -108,7 +108,16 @@ describe('MonopolyEngine', () => {
       const after = decision.boardState as unknown as MonopolyState;
       expect(after.properties[3].ownerSeat).toBeNull();
       expect(after.players[0].cash).toBe(STARTING_CASH);
-      expect(decision.nextTurnSeat).toBe(1);
+      // Turn doesn't advance until the auction resolves.
+      expect(decision.nextTurnSeat).toBe(0);
+      expect(after.auction).toEqual({
+        spaceIndex: 3,
+        highestBid: 0,
+        highestBidderSeat: null,
+        activeBidders: [0, 1],
+        currentBidderSeat: 1,
+        originSeat: 0,
+      });
     });
   });
 
@@ -285,6 +294,303 @@ describe('MonopolyEngine', () => {
       expect(() => engine.buildHouse(afterFirst, 0, 1)).toThrow(
         'Build evenly across the color group first.',
       );
+    });
+  });
+
+  describe('auctions', () => {
+    it('starts an auction directly when the landing player cannot afford the property', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.players[0].cash = 10; // can't afford square 3 ($60)
+      mockDiceOnce(1, 2);
+      const result = engine.rollDice(
+        state as unknown as Record<string, unknown>,
+        seats,
+        0,
+      );
+      const after = result.moveResult!.boardState as unknown as MonopolyState;
+      expect(after.pendingPurchase).toBeNull();
+      expect(after.auction).toMatchObject({
+        spaceIndex: 3,
+        activeBidders: [0, 1],
+        currentBidderSeat: 1,
+        originSeat: 0,
+      });
+      expect(result.moveResult!.nextTurnSeat).toBe(0);
+    });
+
+    function stateWithAuction(): MonopolyState {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.auction = {
+        spaceIndex: 3,
+        highestBid: 0,
+        highestBidderSeat: null,
+        activeBidders: [0, 1],
+        currentBidderSeat: 1,
+        originSeat: 0,
+      };
+      return state;
+    }
+
+    it('rejects a bid out of turn', () => {
+      const state = stateWithAuction();
+      expect(() =>
+        engine.placeBid(state as unknown as Record<string, unknown>, 0, 10),
+      ).toThrow('It is not your turn to bid.');
+    });
+
+    it('rejects a bid that does not exceed the current highest', () => {
+      const state = stateWithAuction();
+      state.auction!.highestBid = 20;
+      expect(() =>
+        engine.placeBid(state as unknown as Record<string, unknown>, 1, 20),
+      ).toThrow('Bid must be higher than the current highest bid.');
+    });
+
+    it('rejects a bid exceeding the bidder\'s cash', () => {
+      const state = stateWithAuction();
+      state.players[1].cash = 5;
+      expect(() =>
+        engine.placeBid(state as unknown as Record<string, unknown>, 1, 10),
+      ).toThrow('You cannot bid more than your cash.');
+    });
+
+    it('records a valid bid and advances to the next bidder', () => {
+      const state = stateWithAuction();
+      const after = engine.placeBid(
+        state as unknown as Record<string, unknown>,
+        1,
+        30,
+      ) as unknown as MonopolyState;
+      expect(after.auction).toMatchObject({
+        highestBid: 30,
+        highestBidderSeat: 1,
+        currentBidderSeat: 0,
+      });
+    });
+
+    it('rejects passing while holding the highest bid', () => {
+      const state = stateWithAuction();
+      state.auction!.highestBid = 30;
+      state.auction!.highestBidderSeat = 1;
+      state.auction!.currentBidderSeat = 1;
+      expect(() =>
+        engine.passAuction(state as unknown as Record<string, unknown>, seats, 1),
+      ).toThrow('You cannot pass while holding the highest bid.');
+    });
+
+    it('resolves the auction and resumes the main turn when one bidder remains after a pass', () => {
+      let state = stateWithAuction();
+      let boardState = engine.placeBid(
+        state as unknown as Record<string, unknown>,
+        1,
+        30,
+      );
+      const passResult = engine.passAuction(boardState, seats, 0);
+      expect(passResult.resolved).toBe(true);
+      const after = passResult.moveResult!.boardState as unknown as MonopolyState;
+      expect(after.properties[3].ownerSeat).toBe(1);
+      expect(after.players[1].cash).toBe(STARTING_CASH - 30);
+      expect(after.auction).toBeNull();
+      // Main turn resumes from originSeat (0), not the auction winner.
+      expect(passResult.moveResult!.nextTurnSeat).toBe(1);
+    });
+
+    it('leaves the property unsold if every bidder passes without ever bidding', () => {
+      const state = stateWithAuction();
+      const passResult = engine.passAuction(
+        state as unknown as Record<string, unknown>,
+        seats,
+        1,
+      );
+      expect(passResult.resolved).toBe(true);
+      const after = passResult.moveResult!.boardState as unknown as MonopolyState;
+      expect(after.properties[3].ownerSeat).toBeNull();
+      expect(after.auction).toBeNull();
+    });
+  });
+
+  describe('trading', () => {
+    function stateWithOwnedProperties(): MonopolyState {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.properties[1].ownerSeat = 0; // Elm Row, seat 0
+      state.properties[6].ownerSeat = 1; // Harbor Lane, seat 1
+      return state;
+    }
+
+    it('rejects offering a property you do not own', () => {
+      const state = stateWithOwnedProperties();
+      expect(() =>
+        engine.proposeTrade(state as unknown as Record<string, unknown>, 0, 1, {
+          offerCash: 0,
+          offerProperties: [6],
+          offerJailCards: 0,
+          requestCash: 0,
+          requestProperties: [],
+          requestJailCards: 0,
+        }),
+      ).toThrow(/does not own/);
+    });
+
+    it('rejects offering a property with houses on it', () => {
+      const state = stateWithOwnedProperties();
+      state.properties[1].houses = 1;
+      expect(() =>
+        engine.proposeTrade(state as unknown as Record<string, unknown>, 0, 1, {
+          offerCash: 0,
+          offerProperties: [1],
+          offerJailCards: 0,
+          requestCash: 0,
+          requestProperties: [],
+          requestJailCards: 0,
+        }),
+      ).toThrow(/houses on it/);
+    });
+
+    it('creates a pending trade offer', () => {
+      const state = stateWithOwnedProperties();
+      const after = engine.proposeTrade(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+        {
+          offerCash: 50,
+          offerProperties: [1],
+          offerJailCards: 0,
+          requestCash: 0,
+          requestProperties: [6],
+          requestJailCards: 0,
+        },
+      ) as unknown as MonopolyState;
+      expect(after.trades).toHaveLength(1);
+      expect(after.trades[0]).toMatchObject({
+        fromSeat: 0,
+        toSeat: 1,
+        offerCash: 50,
+        offerProperties: [1],
+        requestProperties: [6],
+      });
+    });
+
+    it('accepting a trade swaps cash and properties both ways', () => {
+      const state = stateWithOwnedProperties();
+      const proposed = engine.proposeTrade(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+        {
+          offerCash: 50,
+          offerProperties: [1],
+          offerJailCards: 0,
+          requestCash: 20,
+          requestProperties: [6],
+          requestJailCards: 0,
+        },
+      ) as unknown as MonopolyState;
+      const tradeId = proposed.trades[0].id;
+
+      const after = engine.respondToTrade(
+        proposed as unknown as Record<string, unknown>,
+        1,
+        tradeId,
+        true,
+      ) as unknown as MonopolyState;
+
+      expect(after.trades).toHaveLength(0);
+      expect(after.properties[1].ownerSeat).toBe(1);
+      expect(after.properties[6].ownerSeat).toBe(0);
+      // Seat 0 pays 50, receives 20 back -> net -30.
+      expect(after.players[0].cash).toBe(STARTING_CASH - 30);
+      expect(after.players[1].cash).toBe(STARTING_CASH + 30);
+    });
+
+    it('declining a trade just removes the offer with no state change', () => {
+      const state = stateWithOwnedProperties();
+      const proposed = engine.proposeTrade(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+        {
+          offerCash: 50,
+          offerProperties: [1],
+          offerJailCards: 0,
+          requestCash: 0,
+          requestProperties: [6],
+          requestJailCards: 0,
+        },
+      ) as unknown as MonopolyState;
+      const tradeId = proposed.trades[0].id;
+
+      const after = engine.respondToTrade(
+        proposed as unknown as Record<string, unknown>,
+        1,
+        tradeId,
+        false,
+      ) as unknown as MonopolyState;
+
+      expect(after.trades).toHaveLength(0);
+      expect(after.properties[1].ownerSeat).toBe(0);
+      expect(after.players[0].cash).toBe(STARTING_CASH);
+    });
+
+    it('only the recipient can accept; the proposer can still cancel', () => {
+      const state = stateWithOwnedProperties();
+      const proposed = engine.proposeTrade(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+        {
+          offerCash: 0,
+          offerProperties: [1],
+          offerJailCards: 0,
+          requestCash: 0,
+          requestProperties: [6],
+          requestJailCards: 0,
+        },
+      ) as unknown as MonopolyState;
+      const tradeId = proposed.trades[0].id;
+
+      expect(() =>
+        engine.respondToTrade(proposed as unknown as Record<string, unknown>, 0, tradeId, true),
+      ).toThrow('Only the recipient can accept a trade.');
+
+      const cancelled = engine.respondToTrade(
+        proposed as unknown as Record<string, unknown>,
+        0,
+        tradeId,
+        false,
+      ) as unknown as MonopolyState;
+      expect(cancelled.trades).toHaveLength(0);
+    });
+
+    it('re-validates ownership at accept time and rejects a stale offer', () => {
+      const state = stateWithOwnedProperties();
+      const proposed = engine.proposeTrade(
+        state as unknown as Record<string, unknown>,
+        0,
+        1,
+        {
+          offerCash: 0,
+          offerProperties: [1],
+          offerJailCards: 0,
+          requestCash: 0,
+          requestProperties: [6],
+          requestJailCards: 0,
+        },
+      ) as unknown as MonopolyState;
+      const tradeId = proposed.trades[0].id;
+
+      // Seat 0 sells square 1 to the bank (simulating bankruptcy) before
+      // seat 1 gets a chance to accept.
+      proposed.properties[1].ownerSeat = null;
+
+      expect(() =>
+        engine.respondToTrade(
+          proposed as unknown as Record<string, unknown>,
+          1,
+          tradeId,
+          true,
+        ),
+      ).toThrow(/does not own/);
     });
   });
 });

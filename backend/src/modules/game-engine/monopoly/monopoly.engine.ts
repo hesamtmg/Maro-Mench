@@ -34,10 +34,35 @@ export interface MonopolyPropertyState {
   mortgaged: boolean;
 }
 
+export interface MonopolyAuctionState {
+  spaceIndex: number;
+  highestBid: number;
+  highestBidderSeat: number | null;
+  activeBidders: number[];
+  currentBidderSeat: number;
+  // Whoever declined/couldn't afford the property -- the main game turn
+  // resumes from here (not from whoever wins the auction) once it ends.
+  originSeat: number;
+}
+
+export interface MonopolyTradeOffer {
+  id: string;
+  fromSeat: number;
+  toSeat: number;
+  offerCash: number;
+  offerProperties: number[];
+  offerJailCards: number;
+  requestCash: number;
+  requestProperties: number[];
+  requestJailCards: number;
+}
+
 export interface MonopolyState {
   players: Record<number, MonopolyPlayerState>;
   properties: Record<number, MonopolyPropertyState>;
   pendingPurchase: { spaceIndex: number; price: number } | null;
+  auction: MonopolyAuctionState | null;
+  trades: MonopolyTradeOffer[];
   extraRollPending: boolean;
   lastCard: { deck: 'chance' | 'chest'; text: string } | null;
   lastDice: [number, number] | null;
@@ -191,6 +216,8 @@ export class MonopolyEngine implements GameEngine {
       players,
       properties,
       pendingPurchase: null,
+      auction: null,
+      trades: [],
       extraRollPending: false,
       lastCard: null,
       lastDice: null,
@@ -300,7 +327,7 @@ export class MonopolyEngine implements GameEngine {
     }
 
     if (!sentToJailForDoubles) {
-      this.resolveLanding(state, seatIndex, movePayload);
+      this.resolveLanding(state, seats, seatIndex, movePayload);
     }
 
     const active = activeSeats(seats, state);
@@ -312,7 +339,7 @@ export class MonopolyEngine implements GameEngine {
       };
     }
 
-    if (state.pendingPurchase) {
+    if (state.pendingPurchase || state.auction) {
       return {
         diceValue: sum,
         autoResolved: true,
@@ -370,14 +397,27 @@ export class MonopolyEngine implements GameEngine {
       player.cash -= pending.price;
       state.properties[pending.spaceIndex].ownerSeat = seatIndex;
       movePayload.purchased = true;
-    } else {
-      movePayload.purchased = false;
-    }
-    state.pendingPurchase = null;
+      state.pendingPurchase = null;
 
-    const active = activeSeats(seats, state);
-    const fallbackNextSeat = nextActiveSeat(seats, state, seatIndex);
-    return this.finish(state, fallbackNextSeat, active, seatIndex, movePayload);
+      const active = activeSeats(seats, state);
+      const fallbackNextSeat = nextActiveSeat(seats, state, seatIndex);
+      return this.finish(state, fallbackNextSeat, active, seatIndex, movePayload);
+    }
+
+    // Declining sends the property to auction (among all active players,
+    // including the decliner) rather than ending the turn outright -- the
+    // main turn only resumes once the auction resolves.
+    movePayload.purchased = false;
+    state.pendingPurchase = null;
+    this.startAuction(state, seats, pending.spaceIndex, seatIndex);
+    movePayload.auctionStarted = state.auction != null;
+
+    return {
+      boardState: state as unknown as Record<string, unknown>,
+      nextTurnSeat: seatIndex,
+      isGameOver: false,
+      movePayload,
+    };
   }
 
   /** Called by the gateway when a player builds a house/hotel on their turn. */
@@ -443,8 +483,227 @@ export class MonopolyEngine implements GameEngine {
     return state as unknown as Record<string, unknown>;
   }
 
+  /** Called by the gateway when a player bids in an active auction. */
+  placeBid(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    amount: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const auction = state.auction;
+    if (!auction) throw new Error('No auction is in progress.');
+    if (auction.currentBidderSeat !== seatIndex) {
+      throw new Error('It is not your turn to bid.');
+    }
+    const player = state.players[seatIndex];
+    if (!player || player.bankrupt) throw new Error('Invalid bidder.');
+    if (amount <= auction.highestBid) {
+      throw new Error('Bid must be higher than the current highest bid.');
+    }
+    if (amount > player.cash) {
+      throw new Error('You cannot bid more than your cash.');
+    }
+
+    auction.highestBid = amount;
+    auction.highestBidderSeat = seatIndex;
+    const idx = auction.activeBidders.indexOf(seatIndex);
+    auction.currentBidderSeat =
+      auction.activeBidders[(idx + 1) % auction.activeBidders.length];
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /**
+   * Called by the gateway when a player passes in an active auction.
+   * Returns either an in-progress board state (bidding continues) or a
+   * resolved MoveResult (the auction is over and the main turn resumes).
+   */
+  passAuction(
+    boardStateIn: Record<string, unknown>,
+    seats: RoomPlayerSeat[],
+    seatIndex: number,
+  ): { resolved: boolean; boardState: Record<string, unknown>; moveResult?: MoveResult } {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const auction = state.auction;
+    if (!auction) throw new Error('No auction is in progress.');
+    if (auction.currentBidderSeat !== seatIndex) {
+      throw new Error('It is not your turn to bid.');
+    }
+    if (auction.highestBidderSeat === seatIndex) {
+      throw new Error('You cannot pass while holding the highest bid.');
+    }
+
+    const idx = auction.activeBidders.indexOf(seatIndex);
+    auction.activeBidders = auction.activeBidders.filter((s) => s !== seatIndex);
+
+    if (auction.activeBidders.length <= 1) {
+      const winnerSeat = auction.activeBidders[0] ?? auction.highestBidderSeat;
+      const originSeat = auction.originSeat;
+      const movePayload: Record<string, unknown> = { spaceIndex: auction.spaceIndex };
+
+      if (winnerSeat != null && auction.highestBid > 0) {
+        const price = auction.highestBid;
+        state.players[winnerSeat].cash -= price;
+        state.properties[auction.spaceIndex].ownerSeat = winnerSeat;
+        movePayload.auctionWinner = winnerSeat;
+        movePayload.auctionPrice = price;
+      } else {
+        movePayload.auctionWinner = null;
+      }
+      state.auction = null;
+
+      const active = activeSeats(seats, state);
+      const fallbackNextSeat = nextActiveSeat(seats, state, originSeat);
+      const moveResult = this.finish(state, fallbackNextSeat, active, originSeat, movePayload);
+      return { resolved: true, boardState: moveResult.boardState, moveResult };
+    }
+
+    auction.currentBidderSeat = auction.activeBidders[idx % auction.activeBidders.length];
+    return { resolved: false, boardState: state as unknown as Record<string, unknown> };
+  }
+
+  /** Called by the gateway when a player proposes a trade to another player. */
+  proposeTrade(
+    boardStateIn: Record<string, unknown>,
+    fromSeat: number,
+    toSeat: number,
+    offer: {
+      offerCash: number;
+      offerProperties: number[];
+      offerJailCards: number;
+      requestCash: number;
+      requestProperties: number[];
+      requestJailCards: number;
+    },
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    if (fromSeat === toSeat) throw new Error('You cannot trade with yourself.');
+    const from = state.players[fromSeat];
+    const to = state.players[toSeat];
+    if (!from || from.bankrupt || !to || to.bankrupt) {
+      throw new Error('Invalid trade participants.');
+    }
+    this.assertTradeable(state, fromSeat, offer.offerProperties);
+    this.assertTradeable(state, toSeat, offer.requestProperties);
+
+    const trade: MonopolyTradeOffer = {
+      id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fromSeat,
+      toSeat,
+      offerCash: offer.offerCash,
+      offerProperties: offer.offerProperties,
+      offerJailCards: offer.offerJailCards,
+      requestCash: offer.requestCash,
+      requestProperties: offer.requestProperties,
+      requestJailCards: offer.requestJailCards,
+    };
+    state.trades.push(trade);
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /**
+   * Called by the gateway when either side of a trade responds. The
+   * recipient (toSeat) can accept or decline; either side can cancel
+   * (decline) their own pending offer.
+   */
+  respondToTrade(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    tradeId: string,
+    accept: boolean,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const trade = state.trades.find((t) => t.id === tradeId);
+    if (!trade) throw new Error('That trade offer no longer exists.');
+    if (seatIndex !== trade.fromSeat && seatIndex !== trade.toSeat) {
+      throw new Error('This trade is not yours to respond to.');
+    }
+    if (accept && seatIndex !== trade.toSeat) {
+      throw new Error('Only the recipient can accept a trade.');
+    }
+
+    state.trades = state.trades.filter((t) => t.id !== tradeId);
+
+    if (!accept) {
+      return state as unknown as Record<string, unknown>;
+    }
+
+    // Re-validate everything still holds -- ownership/cash may have
+    // changed since the offer was proposed.
+    const from = state.players[trade.fromSeat];
+    const to = state.players[trade.toSeat];
+    if (!from || from.bankrupt || !to || to.bankrupt) {
+      throw new Error('Invalid trade participants.');
+    }
+    this.assertTradeable(state, trade.fromSeat, trade.offerProperties);
+    this.assertTradeable(state, trade.toSeat, trade.requestProperties);
+    if (from.cash < trade.offerCash) throw new Error('Sender no longer has enough cash.');
+    if (to.cash < trade.requestCash) throw new Error('Recipient no longer has enough cash.');
+    if (from.jailFreeCards < trade.offerJailCards) {
+      throw new Error('Sender no longer has enough jail-free cards.');
+    }
+    if (to.jailFreeCards < trade.requestJailCards) {
+      throw new Error('Recipient no longer has enough jail-free cards.');
+    }
+
+    from.cash += trade.requestCash - trade.offerCash;
+    to.cash += trade.offerCash - trade.requestCash;
+    from.jailFreeCards += trade.requestJailCards - trade.offerJailCards;
+    to.jailFreeCards += trade.offerJailCards - trade.requestJailCards;
+    for (const spaceIndex of trade.offerProperties) {
+      state.properties[spaceIndex].ownerSeat = trade.toSeat;
+    }
+    for (const spaceIndex of trade.requestProperties) {
+      state.properties[spaceIndex].ownerSeat = trade.fromSeat;
+    }
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /** Properties must be owned, unmortgaged, and house-free to be tradeable. */
+  private assertTradeable(
+    state: MonopolyState,
+    ownerSeat: number,
+    spaceIndices: number[],
+  ): void {
+    for (const spaceIndex of spaceIndices) {
+      const prop = state.properties[spaceIndex];
+      if (!prop || prop.ownerSeat !== ownerSeat) {
+        throw new Error(`Seat ${ownerSeat} does not own ${BOARD[spaceIndex]?.name ?? spaceIndex}.`);
+      }
+      if (prop.mortgaged) {
+        throw new Error(`${BOARD[spaceIndex].name} is mortgaged and cannot be traded.`);
+      }
+      if (prop.houses > 0) {
+        throw new Error(`${BOARD[spaceIndex].name} has houses on it and cannot be traded.`);
+      }
+    }
+  }
+
+  private startAuction(
+    state: MonopolyState,
+    seats: RoomPlayerSeat[],
+    spaceIndex: number,
+    originSeat: number,
+  ): void {
+    const active = activeSeats(seats, state);
+    if (active.length < 2) return;
+    const originIdx = active.indexOf(originSeat);
+    const startIdx = originIdx === -1 ? 0 : (originIdx + 1) % active.length;
+    state.auction = {
+      spaceIndex,
+      highestBid: 0,
+      highestBidderSeat: null,
+      activeBidders: [...active],
+      currentBidderSeat: active[startIdx],
+      originSeat,
+    };
+  }
+
   private resolveLanding(
     state: MonopolyState,
+    seats: RoomPlayerSeat[],
     seatIndex: number,
     movePayload: Record<string, unknown>,
   ): void {
@@ -492,6 +751,10 @@ export class MonopolyEngine implements GameEngine {
               spaceIndex: space.index,
               price: space.price ?? 0,
             };
+          } else {
+            // Can't afford it -- straight to auction rather than silently
+            // skipping the space.
+            this.startAuction(state, seats, space.index, seatIndex);
           }
           return;
         }

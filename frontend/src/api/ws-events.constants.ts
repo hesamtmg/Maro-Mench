@@ -18,6 +18,10 @@ export const WS_EVENTS_IN = {
   MONOPOLY_PURCHASE_DECISION: 'monopoly_purchase_decision',
   MONOPOLY_BUILD_HOUSE: 'monopoly_build_house',
   MONOPOLY_PAY_JAIL_FINE: 'monopoly_pay_jail_fine',
+  MONOPOLY_PLACE_BID: 'monopoly_place_bid',
+  MONOPOLY_PASS_AUCTION: 'monopoly_pass_auction',
+  MONOPOLY_PROPOSE_TRADE: 'monopoly_propose_trade',
+  MONOPOLY_RESPOND_TRADE: 'monopoly_respond_trade',
 } as const;
 
 export const WS_EVENTS_OUT = {

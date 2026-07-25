@@ -119,6 +119,30 @@ function handleMonopolyPayJailFine() {
   roomStore.monopolyPayJailFine(props.id);
 }
 
+function handleMonopolyPlaceBid(amount: number) {
+  roomStore.monopolyPlaceBid(props.id, amount);
+}
+
+function handleMonopolyPassAuction() {
+  roomStore.monopolyPassAuction(props.id);
+}
+
+function handleMonopolyProposeTrade(offer: {
+  toSeat: number;
+  offerCash: number;
+  offerProperties: number[];
+  offerJailCards: number;
+  requestCash: number;
+  requestProperties: number[];
+  requestJailCards: number;
+}) {
+  roomStore.monopolyProposeTrade(props.id, offer);
+}
+
+function handleMonopolyRespondTrade(tradeId: string, accept: boolean) {
+  roomStore.monopolyRespondTrade(props.id, tradeId, accept);
+}
+
 async function handleLeaveRoom() {
   roomStore.leaveRoom(props.id);
   await router.push({ name: "lobby" });
@@ -471,6 +495,10 @@ onMounted(() => {
             @buy-decision="handleMonopolyBuyDecision"
             @build-house="handleMonopolyBuildHouse"
             @pay-jail-fine="handleMonopolyPayJailFine"
+            @place-bid="handleMonopolyPlaceBid"
+            @pass-auction="handleMonopolyPassAuction"
+            @propose-trade="handleMonopolyProposeTrade"
+            @respond-trade="handleMonopolyRespondTrade"
           />
         </div>
       </div>
@@ -517,6 +545,10 @@ onMounted(() => {
           @buy-decision="handleMonopolyBuyDecision"
           @build-house="handleMonopolyBuildHouse"
           @pay-jail-fine="handleMonopolyPayJailFine"
+          @place-bid="handleMonopolyPlaceBid"
+          @pass-auction="handleMonopolyPassAuction"
+          @propose-trade="handleMonopolyProposeTrade"
+          @respond-trade="handleMonopolyRespondTrade"
         />
 
         <div v-if="roomStore.eventLog.length" class="event-log card">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   BOARD,
   GROUP_COLORS,
@@ -16,10 +16,24 @@ const props = defineProps<{
   hidePlayerSummary?: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   "buy-decision": [buy: boolean];
   "build-house": [spaceIndex: number];
   "pay-jail-fine": [];
+  "place-bid": [amount: number];
+  "pass-auction": [];
+  "propose-trade": [
+    offer: {
+      toSeat: number;
+      offerCash: number;
+      offerProperties: number[];
+      offerJailCards: number;
+      requestCash: number;
+      requestProperties: number[];
+      requestJailCards: number;
+    },
+  ];
+  "respond-trade": [tradeId: string, accept: boolean];
 }>();
 
 interface MonopolyPlayerStateShape {
@@ -27,6 +41,7 @@ interface MonopolyPlayerStateShape {
   position: number;
   inJail: boolean;
   bankrupt: boolean;
+  jailFreeCards: number;
 }
 
 interface MonopolyPropertyStateShape {
@@ -35,10 +50,33 @@ interface MonopolyPropertyStateShape {
   mortgaged: boolean;
 }
 
+interface MonopolyAuctionStateShape {
+  spaceIndex: number;
+  highestBid: number;
+  highestBidderSeat: number | null;
+  activeBidders: number[];
+  currentBidderSeat: number;
+  originSeat: number;
+}
+
+interface MonopolyTradeOfferShape {
+  id: string;
+  fromSeat: number;
+  toSeat: number;
+  offerCash: number;
+  offerProperties: number[];
+  offerJailCards: number;
+  requestCash: number;
+  requestProperties: number[];
+  requestJailCards: number;
+}
+
 interface MonopolyStateShape {
   players: Record<number, MonopolyPlayerStateShape>;
   properties: Record<number, MonopolyPropertyStateShape>;
   pendingPurchase: { spaceIndex: number; price: number } | null;
+  auction: MonopolyAuctionStateShape | null;
+  trades: MonopolyTradeOfferShape[];
 }
 
 const state = computed(
@@ -77,6 +115,123 @@ const buildableProperties = computed(() => {
     return siblings.every((o) => s.properties?.[o.index]?.ownerSeat === seat);
   });
 });
+
+function nameForSeat(seatIndex: number | null): string {
+  if (seatIndex == null) return "A player";
+  return props.players.find((p) => p.seatIndex === seatIndex)?.displayName ?? "A player";
+}
+
+// --- Auction ---
+
+const auction = computed(() => state.value?.auction ?? null);
+const auctionSpace = computed(() =>
+  auction.value ? BOARD[auction.value.spaceIndex] : null
+);
+const isMyBidTurn = computed(
+  () => auction.value != null && props.mySeatIndex === auction.value.currentBidderSeat
+);
+const iAmHighestBidder = computed(
+  () => auction.value != null && props.mySeatIndex === auction.value.highestBidderSeat
+);
+const minNextBid = computed(() => (auction.value?.highestBid ?? 0) + 1);
+const bidAmount = ref(minNextBid.value);
+watch(minNextBid, (v) => {
+  if (bidAmount.value < v) bidAmount.value = v;
+});
+
+function submitBid() {
+  emit("place-bid", Math.max(minNextBid.value, Math.floor(bidAmount.value)));
+}
+
+// --- Trading ---
+
+const tradeableSpaceTypes = new Set(["property", "transit", "utility"]);
+
+function tradeablePropertiesFor(seatIndex: number) {
+  const s = state.value;
+  if (!s) return [];
+  return BOARD.filter((space) => tradeableSpaceTypes.has(space.type)).filter((space) => {
+    const prop = s.properties?.[space.index];
+    return prop && prop.ownerSeat === seatIndex && !prop.mortgaged && (prop.houses ?? 0) === 0;
+  });
+}
+
+function jailCardsFor(seatIndex: number | null): number {
+  if (seatIndex == null) return 0;
+  return state.value?.players?.[seatIndex]?.jailFreeCards ?? 0;
+}
+
+const otherActivePlayers = computed(() =>
+  props.players.filter((p) => p.seatIndex !== props.mySeatIndex && !bankruptFor(p.seatIndex))
+);
+
+const trades = computed(() => state.value?.trades ?? []);
+const myTrades = computed(() =>
+  trades.value.filter(
+    (t) => t.fromSeat === props.mySeatIndex || t.toSeat === props.mySeatIndex
+  )
+);
+
+function tradeSummary(trade: MonopolyTradeOfferShape): string {
+  const offerParts = [
+    trade.offerCash > 0 ? `$${trade.offerCash}` : "",
+    ...trade.offerProperties.map((i) => BOARD[i].name),
+    trade.offerJailCards > 0 ? `${trade.offerJailCards}x jail card` : "",
+  ].filter(Boolean);
+  const requestParts = [
+    trade.requestCash > 0 ? `$${trade.requestCash}` : "",
+    ...trade.requestProperties.map((i) => BOARD[i].name),
+    trade.requestJailCards > 0 ? `${trade.requestJailCards}x jail card` : "",
+  ].filter(Boolean);
+  return `${nameForSeat(trade.fromSeat)} offers ${offerParts.join(", ") || "nothing"} for ${
+    requestParts.join(", ") || "nothing"
+  } from ${nameForSeat(trade.toSeat)}`;
+}
+
+const showTradeForm = ref(false);
+const tradeTargetSeat = ref<number | null>(null);
+const offerProperties = ref<number[]>([]);
+const requestProperties = ref<number[]>([]);
+const offerCash = ref(0);
+const requestCash = ref(0);
+const offerJailCards = ref(0);
+const requestJailCards = ref(0);
+
+const myTradeableProperties = computed(() =>
+  props.mySeatIndex != null ? tradeablePropertiesFor(props.mySeatIndex) : []
+);
+const targetTradeableProperties = computed(() =>
+  tradeTargetSeat.value != null ? tradeablePropertiesFor(tradeTargetSeat.value) : []
+);
+
+function resetTradeForm() {
+  tradeTargetSeat.value = otherActivePlayers.value[0]?.seatIndex ?? null;
+  offerProperties.value = [];
+  requestProperties.value = [];
+  offerCash.value = 0;
+  requestCash.value = 0;
+  offerJailCards.value = 0;
+  requestJailCards.value = 0;
+}
+
+function openTradeForm() {
+  resetTradeForm();
+  showTradeForm.value = true;
+}
+
+function submitTrade() {
+  if (tradeTargetSeat.value == null) return;
+  emit("propose-trade", {
+    toSeat: tradeTargetSeat.value,
+    offerCash: Math.max(0, Math.floor(offerCash.value)),
+    offerProperties: offerProperties.value,
+    offerJailCards: Math.max(0, Math.floor(offerJailCards.value)),
+    requestCash: Math.max(0, Math.floor(requestCash.value)),
+    requestProperties: requestProperties.value,
+    requestJailCards: Math.max(0, Math.floor(requestJailCards.value)),
+  });
+  showTradeForm.value = false;
+}
 
 function playerColor(seatIndex: number | null): string {
   if (seatIndex == null) return "#999";
@@ -180,6 +335,35 @@ function isCorner(index: number): boolean {
           </div>
         </div>
 
+        <div v-if="auction" class="ms-action card ms-auction">
+          <p>
+            🔨 Auction: <strong>{{ auctionSpace?.name }}</strong> -- highest bid
+            <strong>${{ auction.highestBid }}</strong>
+            <template v-if="auction.highestBidderSeat != null">
+              by {{ nameForSeat(auction.highestBidderSeat) }}
+            </template>
+          </p>
+          <div v-if="isMyBidTurn" class="row">
+            <input
+              v-model.number="bidAmount"
+              type="number"
+              :min="minNextBid"
+              class="ms-bid-input"
+            />
+            <button class="btn btn-primary" @click="submitBid">Bid</button>
+            <button
+              class="btn btn-secondary"
+              :disabled="iAmHighestBidder"
+              @click="$emit('pass-auction')"
+            >
+              Pass
+            </button>
+          </div>
+          <p v-else class="text-muted">
+            Waiting for {{ nameForSeat(auction.currentBidderSeat) }} to bid…
+          </p>
+        </div>
+
         <div v-if="pendingPurchase && isMyTurn" class="ms-action card">
           <p>
             Buy <strong>{{ pendingSpace?.name }}</strong> for ${{ pendingPurchase.price }}?
@@ -199,7 +383,7 @@ function isCorner(index: number): boolean {
           </p>
         </div>
 
-        <div v-if="isMyTurn && !pendingPurchase && myPlayerState?.inJail" class="ms-action card">
+        <div v-if="isMyTurn && !pendingPurchase && !auction && myPlayerState?.inJail" class="ms-action card">
           <p class="text-muted">You're in jail.</p>
           <button class="btn btn-secondary" @click="$emit('pay-jail-fine')">
             Pay $50 to get out
@@ -207,7 +391,7 @@ function isCorner(index: number): boolean {
         </div>
 
         <div
-          v-if="isMyTurn && !pendingPurchase && buildableProperties.length"
+          v-if="isMyTurn && !pendingPurchase && !auction && buildableProperties.length"
           class="ms-action card"
         >
           <p class="text-muted">Build a house:</p>
@@ -220,6 +404,122 @@ function isCorner(index: number): boolean {
             >
               {{ space.name }} (${{ space.houseCost }})
             </button>
+          </div>
+        </div>
+
+        <div v-if="myTrades.length" class="ms-action card">
+          <p class="text-muted">Trade offers:</p>
+          <div class="ms-trade-list">
+            <div v-for="trade in myTrades" :key="trade.id" class="ms-trade-row">
+              <span>{{ tradeSummary(trade) }}</span>
+              <div class="row">
+                <button
+                  v-if="trade.toSeat === mySeatIndex"
+                  class="btn btn-primary ms-trade-btn"
+                  @click="$emit('respond-trade', trade.id, true)"
+                >
+                  Accept
+                </button>
+                <button
+                  class="btn btn-secondary ms-trade-btn"
+                  @click="$emit('respond-trade', trade.id, false)"
+                >
+                  {{ trade.toSeat === mySeatIndex ? "Decline" : "Cancel" }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!auction && otherActivePlayers.length" class="ms-action card">
+          <button
+            v-if="!showTradeForm"
+            class="btn btn-secondary"
+            @click="openTradeForm"
+          >
+            Propose a trade
+          </button>
+
+          <div v-else class="ms-trade-form">
+            <div class="form-group">
+              <label>Trade with</label>
+              <select v-model.number="tradeTargetSeat">
+                <option
+                  v-for="p in otherActivePlayers"
+                  :key="p.userId"
+                  :value="p.seatIndex"
+                >
+                  {{ p.displayName }}
+                </option>
+              </select>
+            </div>
+
+            <div class="ms-trade-columns">
+              <div class="ms-trade-col">
+                <p class="text-muted">You give</p>
+                <label class="ms-inline-label">
+                  Cash <input v-model.number="offerCash" type="number" min="0" />
+                </label>
+                <label class="ms-inline-label">
+                  Jail cards
+                  <input
+                    v-model.number="offerJailCards"
+                    type="number"
+                    min="0"
+                    :max="jailCardsFor(mySeatIndex)"
+                  />
+                </label>
+                <div class="ms-trade-props">
+                  <label v-for="space in myTradeableProperties" :key="space.index">
+                    <input
+                      type="checkbox"
+                      :value="space.index"
+                      v-model="offerProperties"
+                    />
+                    {{ space.name }}
+                  </label>
+                </div>
+              </div>
+
+              <div class="ms-trade-col">
+                <p class="text-muted">You get</p>
+                <label class="ms-inline-label">
+                  Cash <input v-model.number="requestCash" type="number" min="0" />
+                </label>
+                <label class="ms-inline-label">
+                  Jail cards
+                  <input
+                    v-model.number="requestJailCards"
+                    type="number"
+                    min="0"
+                    :max="jailCardsFor(tradeTargetSeat)"
+                  />
+                </label>
+                <div class="ms-trade-props">
+                  <label v-for="space in targetTradeableProperties" :key="space.index">
+                    <input
+                      type="checkbox"
+                      :value="space.index"
+                      v-model="requestProperties"
+                    />
+                    {{ space.name }}
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <button
+                class="btn btn-primary"
+                :disabled="tradeTargetSeat == null"
+                @click="submitTrade"
+              >
+                Send offer
+              </button>
+              <button class="btn btn-secondary" @click="showTradeForm = false">
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -375,6 +675,78 @@ function isCorner(index: number): boolean {
   font-size: 0.75rem;
   padding: 0.35rem 0.6rem;
   text-align: left;
+}
+
+.ms-auction {
+  border: 1px solid rgba(240, 180, 41, 0.5);
+}
+
+.ms-bid-input {
+  width: 5rem;
+}
+
+.ms-trade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ms-trade-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ms-trade-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.ms-trade-btn {
+  font-size: 0.72rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.ms-trade-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ms-trade-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.ms-trade-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+}
+
+.ms-inline-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.ms-inline-label input {
+  width: 4.5rem;
+}
+
+.ms-trade-props {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 0.72rem;
 }
 
 @media (max-width: 640px) {

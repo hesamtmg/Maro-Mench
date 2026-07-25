@@ -21,6 +21,12 @@ export const WS_EVENTS_IN = {
   MONOPOLY_PURCHASE_DECISION: 'monopoly_purchase_decision', // { roomId, buy }
   MONOPOLY_BUILD_HOUSE: 'monopoly_build_house', // { roomId, spaceIndex }
   MONOPOLY_PAY_JAIL_FINE: 'monopoly_pay_jail_fine', // { roomId }
+  // Auctions/trades aren't gated to whoever's turn it is -- any active
+  // (non-bankrupt) player can bid or trade regardless of currentTurnSeat.
+  MONOPOLY_PLACE_BID: 'monopoly_place_bid', // { roomId, amount }
+  MONOPOLY_PASS_AUCTION: 'monopoly_pass_auction', // { roomId }
+  MONOPOLY_PROPOSE_TRADE: 'monopoly_propose_trade', // { roomId, toSeat, offerCash, offerProperties, offerJailCards, requestCash, requestProperties, requestJailCards }
+  MONOPOLY_RESPOND_TRADE: 'monopoly_respond_trade', // { roomId, tradeId, accept }
 } as const;
 
 // Server -> Client events

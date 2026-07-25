@@ -619,6 +619,152 @@ export class GameGateway
     }
   }
 
+  /**
+   * Monopoly-only: bids in an active auction. Not gated to currentTurnSeat
+   * -- any active player can be the current bidder regardless of whose
+   * main turn it nominally is (the engine enforces auction turn order).
+   */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_PLACE_BID)
+  async onMonopolyPlaceBid(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; amount: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (!player) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
+      return;
+    }
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    try {
+      const boardState = this.monopolyEngine.placeBid(
+        gameState.boardState,
+        player.seatIndex,
+        payload.amount,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server
+        .to(room.id)
+        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Monopoly-only: passes in an active auction. May resolve the auction and resume the main turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_PASS_AUCTION)
+  async onMonopolyPassAuction(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (!player) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
+      return;
+    }
+    const gameState = await this.gameStateService.getGameState(room.id);
+    const seats = this.gameStateService.toSeats(room.players);
+
+    try {
+      const result = this.monopolyEngine.passAuction(
+        gameState.boardState,
+        seats,
+        player.seatIndex,
+      );
+      if (result.resolved && result.moveResult) {
+        this.scheduler.clearTurnTimeout(room.id);
+        await this.applyAndBroadcastMove(
+          room,
+          gameState,
+          player.seatIndex,
+          0,
+          result.moveResult,
+        );
+      } else {
+        await this.gameStateService.updateGameState(gameState, {
+          boardState: result.boardState,
+        });
+        this.server
+          .to(room.id)
+          .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState: result.boardState });
+      }
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Monopoly-only: proposes a trade to another player. Can happen anytime, not just on your turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_PROPOSE_TRADE)
+  async onMonopolyProposeTrade(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody()
+    payload: {
+      roomId: string;
+      toSeat: number;
+      offerCash: number;
+      offerProperties: number[];
+      offerJailCards: number;
+      requestCash: number;
+      requestProperties: number[];
+      requestJailCards: number;
+    },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (!player) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
+      return;
+    }
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    try {
+      const boardState = this.monopolyEngine.proposeTrade(
+        gameState.boardState,
+        player.seatIndex,
+        payload.toSeat,
+        payload,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server
+        .to(room.id)
+        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Monopoly-only: accepts, declines, or cancels a pending trade. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_RESPOND_TRADE)
+  async onMonopolyRespondTrade(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; tradeId: string; accept: boolean },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (!player) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'You are not in this room' });
+      return;
+    }
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    try {
+      const boardState = this.monopolyEngine.respondToTrade(
+        gameState.boardState,
+        player.seatIndex,
+        payload.tradeId,
+        payload.accept,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server
+        .to(room.id)
+        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   private async applyAndBroadcastMove(
     room: Room,
     gameState: Awaited<ReturnType<GameStateService['getGameState']>>,
@@ -672,6 +818,22 @@ export class GameGateway
       const gameState = await this.gameStateService.getGameState(roomId);
       const seats = this.gameStateService.toSeats(room.players);
 
+      // Monopoly's pendingPurchase/auction pause the main turn on a
+      // *different* seat than gameState.currentTurnSeat (the auction's
+      // current bidder, say) -- blindly advancing currentTurnSeat here
+      // would corrupt that in-progress decision. Auto-resolve it instead
+      // (auto-pass the stalled bidder, or auto-decline a stalled
+      // purchase) so the game can never get stuck.
+      if (room.gameType.code === GameTypeCode.MONOPOLY) {
+        const resolved = await this.autoResolveStalledMonopolyDecision(
+          room,
+          gameState,
+          seats,
+          reason,
+        );
+        if (resolved) return;
+      }
+
       const sortedActive = [...seats].sort((a, b) => a.seatIndex - b.seatIndex);
       const currentIdx = sortedActive.findIndex(
         (s) => s.seatIndex === gameState.currentTurnSeat,
@@ -690,6 +852,7 @@ export class GameGateway
       this.server.to(roomId).emit(WS_EVENTS_OUT.TURN_SKIPPED, {
         seatIndex: skippedSeat,
         reason,
+        nextTurnSeat: nextSeat,
       });
 
       this.scheduleTurnTimeoutFor(roomId);
@@ -698,6 +861,71 @@ export class GameGateway
         `Failed to skip turn for room ${roomId}: ${(err as Error).message}`,
       );
     }
+  }
+
+  /** Returns true if a stalled Monopoly decision was found and auto-resolved. */
+  private async autoResolveStalledMonopolyDecision(
+    room: Room,
+    gameState: Awaited<ReturnType<GameStateService['getGameState']>>,
+    seats: ReturnType<GameStateService['toSeats']>,
+    reason: string,
+  ): Promise<boolean> {
+    const state = gameState.boardState as {
+      auction?: { currentBidderSeat: number } | null;
+      pendingPurchase?: unknown;
+    };
+
+    if (state.auction) {
+      const bidderSeat = state.auction.currentBidderSeat;
+      const result = this.monopolyEngine.passAuction(
+        gameState.boardState,
+        seats,
+        bidderSeat,
+      );
+      this.server.to(room.id).emit(WS_EVENTS_OUT.TURN_SKIPPED, {
+        seatIndex: bidderSeat,
+        reason,
+        // Auction bidding doesn't move gameState.currentTurnSeat itself
+        // (see resolvePurchaseDecision/passAuction); if this pass just
+        // resolved the auction, the MOVE_APPLIED broadcast right after
+        // this carries the real post-auction nextTurnSeat.
+        nextTurnSeat: gameState.currentTurnSeat,
+      });
+      if (result.resolved && result.moveResult) {
+        await this.applyAndBroadcastMove(room, gameState, bidderSeat, 0, result.moveResult);
+      } else {
+        await this.gameStateService.updateGameState(gameState, {
+          boardState: result.boardState,
+        });
+        this.server
+          .to(room.id)
+          .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState: result.boardState });
+        this.scheduleTurnTimeoutFor(room.id);
+      }
+      return true;
+    }
+
+    if (state.pendingPurchase) {
+      const buyerSeat = gameState.currentTurnSeat;
+      const moveResult = this.monopolyEngine.resolvePurchaseDecision(
+        gameState.boardState,
+        seats,
+        buyerSeat,
+        false,
+      );
+      this.server.to(room.id).emit(WS_EVENTS_OUT.TURN_SKIPPED, {
+        seatIndex: buyerSeat,
+        reason,
+        // Auto-declining starts an auction rather than moving the turn --
+        // the MOVE_APPLIED broadcast right after this carries the real
+        // (unchanged, still buyerSeat) nextTurnSeat.
+        nextTurnSeat: gameState.currentTurnSeat,
+      });
+      await this.applyAndBroadcastMove(room, gameState, buyerSeat, 0, moveResult);
+      return true;
+    }
+
+    return false;
   }
 
   private scheduleTurnTimeoutFor(roomId: string) {

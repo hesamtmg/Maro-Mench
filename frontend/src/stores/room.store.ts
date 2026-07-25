@@ -110,7 +110,14 @@ interface RoomState {
 function monopolyEventMessage(
   name: string,
   payload: Record<string, unknown>,
+  room: Room | null,
 ): string {
+  if (payload.auctionWinner !== undefined) {
+    if (payload.auctionWinner == null) return `🔨 Auction closed with no bids.`;
+    const winnerName = displayNameForSeat(room, payload.auctionWinner as number);
+    return `🔨 ${winnerName} won the auction for $${payload.auctionPrice}.`;
+  }
+  if (payload.auctionStarted) return `🔨 ${name} passed -- going to auction.`;
   if (payload.skipped) return `⏭️ ${name} has no properties left to lose -- skipped.`;
   if (payload.wentBankrupt) return `💸 ${name} went bankrupt!`;
   if (payload.sentToJail) return `🚔 ${name} was sent to jail.`;
@@ -254,7 +261,7 @@ export const useRoomStore = defineStore('room', {
         const isMonopoly = this.room?.gameType.code === 'monopoly';
 
         if (isMonopoly) {
-          this.pushEvent(monopolyEventMessage(name, movePayload));
+          this.pushEvent(monopolyEventMessage(name, movePayload, this.room));
           if (movePayload.wentBankrupt || movePayload.rentPaid) playCrash();
         } else if (movePayload.noLegalMove) {
           this.pushEvent(`↪️ ${name} had no legal move.`);
@@ -441,6 +448,33 @@ export const useRoomStore = defineStore('room', {
 
     monopolyPayJailFine(roomId: string) {
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE, { roomId });
+    },
+
+    monopolyPlaceBid(roomId: string, amount: number) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PLACE_BID, { roomId, amount });
+    },
+
+    monopolyPassAuction(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PASS_AUCTION, { roomId });
+    },
+
+    monopolyProposeTrade(
+      roomId: string,
+      offer: {
+        toSeat: number;
+        offerCash: number;
+        offerProperties: number[];
+        offerJailCards: number;
+        requestCash: number;
+        requestProperties: number[];
+        requestJailCards: number;
+      },
+    ) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PROPOSE_TRADE, { roomId, ...offer });
+    },
+
+    monopolyRespondTrade(roomId: string, tradeId: string, accept: boolean) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_RESPOND_TRADE, { roomId, tradeId, accept });
     },
 
     kickPlayer(roomId: string, targetUserId: string) {

@@ -133,7 +133,11 @@ const buildableProperties = computed(() => {
     const siblings = BOARD.filter(
       (o) => o.type === "property" && o.group === space.group
     );
-    return siblings.every((o) => s.properties?.[o.index]?.ownerSeat === seat);
+    if (!siblings.every((o) => s.properties?.[o.index]?.ownerSeat === seat)) return false;
+    // Even-build rule (mirrors the backend): can't build ahead of the
+    // group's least-built property.
+    const minHouses = Math.min(...siblings.map((o) => s.properties?.[o.index]?.houses ?? 0));
+    return (prop.houses ?? 0) <= minHouses;
   });
 });
 

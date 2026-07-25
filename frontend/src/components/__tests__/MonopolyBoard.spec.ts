@@ -156,7 +156,7 @@ describe('MonopolyBoard', () => {
     expect(dot.attributes('style')).toContain('rgb(58, 161, 92)'); // Carol's #3aa15c
   });
 
-  it('shows a house count and a hotel icon distinctly', () => {
+  it('shows a house count and a hotel icon distinctly in the center Buildings list', () => {
     const wrapper = mountBoard({
       properties: {
         ...baseState().properties,
@@ -164,9 +164,10 @@ describe('MonopolyBoard', () => {
         3: { ownerSeat: 0, houses: 5, mortgaged: false },
       },
     });
-    const cells = wrapper.findAll('.ms-cell');
-    expect(cells[1].find('.ms-houses').text()).toBe('🏠🏠🏠');
-    expect(cells[3].find('.ms-houses').text()).toBe('🏨');
+    const items = wrapper.findAll('.ms-buildings .ms-owned-item');
+    expect(items).toHaveLength(2);
+    expect(items[0].find('.ms-owned-houses').text()).toBe('🏠🏠🏠');
+    expect(items[1].find('.ms-owned-houses').text()).toBe('🏨');
   });
 
   it('marks a mortgaged property with the dimmed class and an "M" badge', () => {

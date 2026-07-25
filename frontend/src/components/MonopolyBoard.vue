@@ -388,6 +388,18 @@ function netWorthFor(seatIndex: number): number {
   return cashFor(seatIndex) + propertyValueFor(seatIndex);
 }
 
+// Houses/hotels live here instead of cluttering the small tiles on the
+// board edge -- one compact list, land name beside its build level.
+const buildingsList = computed(() => {
+  const s = state.value;
+  if (!s) return [];
+  return BOARD.filter((space) => housesFor(space.index) > 0).map((space) => ({
+    space,
+    houses: housesFor(space.index),
+    ownerSeat: ownerSeatFor(space.index),
+  }));
+});
+
 function playersOn(spaceIndex: number): RoomPlayer[] {
   const s = state.value;
   if (!s) return [];
@@ -445,9 +457,6 @@ function isCorner(index: number): boolean {
           class="ms-owner-dot"
           :style="{ background: playerColor(ownerSeatFor(space.index)) }"
         />
-        <div v-if="housesFor(space.index) > 0" class="ms-houses">
-          {{ housesFor(space.index) >= HOTEL_LEVEL ? '🏨' : '🏠'.repeat(housesFor(space.index)) }}
-        </div>
         <div v-if="playersOn(space.index).length" class="ms-tokens">
           <span
             v-for="p in playersOn(space.index)"
@@ -519,6 +528,28 @@ function isCorner(index: number): boolean {
               </ul>
             </div>
           </div>
+        </div>
+
+        <div v-if="buildingsList.length" class="ms-action card ms-buildings">
+          <p class="text-muted">🏠 Buildings</p>
+          <ul class="ms-owned-list">
+            <li
+              v-for="{ space, houses, ownerSeat } in buildingsList"
+              :key="space.index"
+              class="ms-owned-item"
+            >
+              <span
+                v-if="space.group"
+                class="ms-owned-swatch"
+                :style="{ background: GROUP_COLORS[space.group] }"
+              />
+              <span class="ms-owned-name">{{ space.name }}</span>
+              <span class="ms-owned-houses">
+                {{ houses >= HOTEL_LEVEL ? '🏨' : '🏠'.repeat(houses) }}
+              </span>
+              <span class="text-muted ms-owned-by">{{ nameForSeat(ownerSeat) }}</span>
+            </li>
+          </ul>
         </div>
 
         <div v-if="auction" class="ms-action card ms-auction">
@@ -800,8 +831,11 @@ function isCorner(index: number): boolean {
 
 .monopoly-board {
   display: grid;
-  grid-template-columns: repeat(11, 1fr);
-  grid-template-rows: repeat(11, 1fr);
+  /* Corners (GO, Jail, Free Parking, Go To Jail) stay full-size; the
+     ordinary middle tiles run smaller now that houses/hotels no longer
+     need to fit on them (see .ms-buildings in the center instead). */
+  grid-template-columns: 1.25fr repeat(9, 1fr) 1.25fr;
+  grid-template-rows: 1.25fr repeat(9, 1fr) 1.25fr;
   gap: 2px;
   aspect-ratio: 1;
   background: var(--color-border);
@@ -943,11 +977,6 @@ function isCorner(index: number): boolean {
   height: 7px;
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
-}
-
-.ms-houses {
-  font-size: clamp(0.4rem, 0.9vw, 0.6rem);
-  line-height: 1;
 }
 
 .ms-mortgaged {
@@ -1099,8 +1128,17 @@ function isCorner(index: number): boolean {
 }
 
 .ms-action {
-  padding: 0.6rem 0.75rem;
-  font-size: 0.85rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+.ms-owned-by {
+  font-size: 0.65rem;
+}
+
+.ms-buildings .ms-owned-list {
+  max-height: 140px;
+  overflow-y: auto;
 }
 
 .ms-action p {

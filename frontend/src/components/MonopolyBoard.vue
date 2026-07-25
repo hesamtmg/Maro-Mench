@@ -5,6 +5,7 @@ import {
   GROUP_COLORS,
   HOTEL_LEVEL,
   iconFor,
+  tokenIconForSeat,
 } from "./monopoly/board-config";
 import type { RoomPlayer } from "../types";
 
@@ -408,7 +409,7 @@ function isCorner(index: number): boolean {
             class="ms-token"
             :style="{ background: p.color ?? '#999' }"
             :title="p.displayName"
-          />
+          >{{ tokenIconForSeat(p.seatIndex) }}</span>
         </div>
       </div>
 
@@ -420,7 +421,7 @@ function isCorner(index: number): boolean {
             class="ms-player-row"
             :class="{ 'ms-player-active': p.seatIndex === currentTurnSeat }"
           >
-            <span class="color-dot" :style="{ background: p.color ?? '#4f46e5' }" />
+            <span class="color-dot" :style="{ background: p.color ?? '#4f46e5' }">{{ tokenIconForSeat(p.seatIndex) }}</span>
             <strong>{{ p.displayName }}</strong>
             <span class="text-muted">${{ cashFor(p.seatIndex) }}</span>
             <span v-if="bankruptFor(p.seatIndex)" class="text-muted">💸</span>
@@ -801,10 +802,15 @@ function isCorner(index: number): boolean {
 }
 
 .ms-token {
-  width: 7px;
-  height: 7px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
 }
 
 .ms-center {
@@ -838,10 +844,15 @@ function isCorner(index: number): boolean {
 }
 
 .color-dot {
-  width: 10px;
-  height: 10px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .ms-action {

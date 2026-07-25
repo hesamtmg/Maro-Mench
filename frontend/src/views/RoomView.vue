@@ -6,7 +6,10 @@ import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
 import MonopolyBoard from "../components/MonopolyBoard.vue";
-import { BOARD as MONOPOLY_BOARD } from "../components/monopoly/board-config";
+import {
+  BOARD as MONOPOLY_BOARD,
+  tokenIconForSeat,
+} from "../components/monopoly/board-config";
 import OloBoard from "../components/OloBoard.vue";
 import PlayerList from "../components/PlayerList.vue";
 import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
@@ -504,7 +507,9 @@ onMounted(() => {
             :key="p.seatIndex"
             class="row net-worth-row"
           >
-            <span class="color-dot" :style="{ background: p.color ?? '#4f46e5' }" />
+            <span class="color-dot" :style="{ background: p.color ?? '#4f46e5' }">{{
+              tokenIconForSeat(p.seatIndex)
+            }}</span>
             <strong>{{ p.displayName }}</strong>
             <span class="text-muted"
               >${{ p.worth }}<template v-if="p.bankrupt"> · bankrupt</template></span
@@ -538,7 +543,8 @@ onMounted(() => {
               <span
                 class="color-dot"
                 :style="{ background: player.color ?? '#4f46e5' }"
-              />
+                >{{ gameTypeCode === 'monopoly' ? tokenIconForSeat(player.seatIndex) : '' }}</span
+              >
               <strong>{{ player.displayName }}</strong>
               <span v-if="gameTypeCode === 'ludo'" class="text-muted">
                 Home: {{ ludoHomeCount(player.seatIndex) }} · Finished:
@@ -848,10 +854,15 @@ onMounted(() => {
 }
 
 .color-dot {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .player-row {

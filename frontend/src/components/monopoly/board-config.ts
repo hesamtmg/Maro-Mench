@@ -117,3 +117,12 @@ const SPACE_ICONS: Partial<Record<MonopolySpaceType, string>> = {
 export function iconFor(space: MonopolySpace): string {
   return SPACE_ICONS[space.type] ?? '';
 }
+
+// Classic-style playing pieces, one per seat -- generic emoji, not any
+// specific game's actual token art, cycled by seatIndex so it works for
+// any player count up to the room's max.
+export const PLAYER_TOKEN_ICONS = ['🚗', '🎩', '🐕', '👞', '🚢', '🐈', '🐧', '⚓'];
+
+export function tokenIconForSeat(seatIndex: number): string {
+  return PLAYER_TOKEN_ICONS[seatIndex % PLAYER_TOKEN_ICONS.length];
+}

@@ -3,8 +3,15 @@ import { connectSocket, getSocket } from '../api/socket.client';
 import { WS_EVENTS_IN, WS_EVENTS_OUT } from '../api/ws-events.constants';
 import {
   playAhh,
+  playBankruptSting,
+  playCardFlip,
+  playCashRegister,
+  playCoin,
   playCrash,
+  playGavel,
+  playHammerTap,
   playHooray,
+  playJailClang,
   playStairs,
   playSwallow,
   playVictoryFanfare,
@@ -109,6 +116,25 @@ interface RoomState {
   // lastDiceValue is their *sum* (up to 12), which doesn't fit the
   // 1-6 pip die widget, so Monopoly renders two dice from this instead.
   monopolyDice: [number, number] | null;
+}
+
+// Mirrors monopolyEventMessage's priority order, one sound per outcome.
+function monopolyEventSound(payload: Record<string, unknown>) {
+  if (payload.auctionWinner !== undefined) {
+    if (payload.auctionWinner == null) playAhh();
+    else playCashRegister();
+    return;
+  }
+  if (payload.auctionStarted) return playGavel();
+  if (payload.wentBankrupt) return playBankruptSting();
+  if (payload.sentToJail) return playJailClang();
+  if (payload.jailEvent === 'rolled_out') return playHooray();
+  if (payload.jailEvent === 'forced_fine') return playCoin();
+  if (payload.jailEvent === 'stayed') return playJailClang();
+  if (payload.purchased === true) return playCashRegister();
+  if (payload.card) return playCardFlip();
+  if (payload.taxPaid) return playCoin();
+  if (payload.rentPaid) return playCoin();
 }
 
 function monopolyEventMessage(
@@ -273,7 +299,7 @@ export const useRoomStore = defineStore('room', {
             this.monopolyDice = [die1, die2];
           }
           this.pushEvent(monopolyEventMessage(name, movePayload, this.room));
-          if (movePayload.wentBankrupt || movePayload.rentPaid) playCrash();
+          monopolyEventSound(movePayload);
         } else if (movePayload.noLegalMove) {
           this.pushEvent(`↪️ ${name} had no legal move.`);
           playAhh();
@@ -454,14 +480,17 @@ export const useRoomStore = defineStore('room', {
     },
 
     monopolyBuildHouse(roomId: string, spaceIndex: number) {
+      playHammerTap();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_BUILD_HOUSE, { roomId, spaceIndex });
     },
 
     monopolyPayJailFine(roomId: string) {
+      playCoin();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE, { roomId });
     },
 
     monopolyPlaceBid(roomId: string, amount: number) {
+      playGavel();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_PLACE_BID, { roomId, amount });
     },
 
@@ -485,18 +514,22 @@ export const useRoomStore = defineStore('room', {
     },
 
     monopolyRespondTrade(roomId: string, tradeId: string, accept: boolean) {
+      if (accept) playCashRegister();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_RESPOND_TRADE, { roomId, tradeId, accept });
     },
 
     monopolyMortgage(roomId: string, spaceIndex: number) {
+      playCashRegister();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_MORTGAGE, { roomId, spaceIndex });
     },
 
     monopolyUnmortgage(roomId: string, spaceIndex: number) {
+      playCoin();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_UNMORTGAGE, { roomId, spaceIndex });
     },
 
     monopolySellHouse(roomId: string, spaceIndex: number) {
+      playCoin();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_SELL_HOUSE, { roomId, spaceIndex });
     },
 

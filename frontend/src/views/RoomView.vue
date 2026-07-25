@@ -507,7 +507,7 @@ onMounted(() => {
             :key="p.seatIndex"
             class="row net-worth-row"
           >
-            <span class="color-dot" :style="{ background: p.color ?? '#4f46e5' }">{{
+            <span class="color-dot token-3d" :style="{ '--token-color': p.color ?? '#4f46e5' }">{{
               tokenIconForSeat(p.seatIndex)
             }}</span>
             <strong>{{ p.displayName }}</strong>
@@ -542,7 +542,12 @@ onMounted(() => {
             >
               <span
                 class="color-dot"
-                :style="{ background: player.color ?? '#4f46e5' }"
+                :class="{ 'token-3d': gameTypeCode === 'monopoly' }"
+                :style="
+                  gameTypeCode === 'monopoly'
+                    ? { '--token-color': player.color ?? '#4f46e5' }
+                    : { background: player.color ?? '#4f46e5' }
+                "
                 >{{ gameTypeCode === 'monopoly' ? tokenIconForSeat(player.seatIndex) : '' }}</span
               >
               <strong>{{ player.displayName }}</strong>
@@ -863,6 +868,22 @@ onMounted(() => {
   font-size: 10px;
   line-height: 1;
   flex-shrink: 0;
+}
+
+/* Monopoly only (see gameTypeCode checks above) -- a glossy raised-piece
+   look instead of a flat color dot, matching MonopolyBoard's own tokens. */
+.token-3d {
+  --token-color: #4f46e5;
+  background: radial-gradient(
+    circle at 32% 28%,
+    color-mix(in srgb, var(--token-color) 45%, white) 0%,
+    var(--token-color) 55%,
+    color-mix(in srgb, var(--token-color) 65%, black) 100%
+  );
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.5),
+    inset 0 1px 1px rgba(255, 255, 255, 0.7),
+    inset 0 -2px 2px rgba(0, 0, 0, 0.4);
 }
 
 .player-row {

@@ -127,6 +127,8 @@ function monopolyEventSound(payload: Record<string, unknown>) {
   }
   if (payload.auctionStarted) return playGavel();
   if (payload.wentBankrupt) return playBankruptSting();
+  if (payload.debtPending) return playAhh();
+  if (payload.debtPaid) return playCoin();
   if (payload.sentToJail) return playJailClang();
   if (payload.jailEvent === 'rolled_out') return playHooray();
   if (payload.jailEvent === 'forced_fine') return playCoin();
@@ -150,6 +152,8 @@ function monopolyEventMessage(
   if (payload.auctionStarted) return `🔨 ${name} passed -- going to auction.`;
   if (payload.skipped) return `⏭️ ${name} has no properties left to lose -- skipped.`;
   if (payload.wentBankrupt) return `💸 ${name} went bankrupt!`;
+  if (payload.debtPending) return `⚠️ ${name} owes $${payload.debtPending} and can't cover it!`;
+  if (payload.debtPaid) return `💰 ${name} paid off a $${payload.debtPaid} debt.`;
   if (payload.sentToJail) return `🚔 ${name} was sent to jail.`;
   if (payload.jailEvent === 'rolled_out') {
     return `🎲 ${name} rolled doubles and got out of jail!`;
@@ -531,6 +535,15 @@ export const useRoomStore = defineStore('room', {
     monopolySellHouse(roomId: string, spaceIndex: number) {
       playCoin();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_SELL_HOUSE, { roomId, spaceIndex });
+    },
+
+    monopolyPayDebt(roomId: string) {
+      playCoin();
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_DEBT, { roomId });
+    },
+
+    monopolyDeclareBankruptcy(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_DECLARE_BANKRUPTCY, { roomId });
     },
 
     kickPlayer(roomId: string, targetUserId: string) {

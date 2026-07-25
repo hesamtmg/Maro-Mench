@@ -30,6 +30,8 @@ export const WS_EVENTS_IN = {
   MONOPOLY_MORTGAGE: 'monopoly_mortgage', // { roomId, spaceIndex }
   MONOPOLY_UNMORTGAGE: 'monopoly_unmortgage', // { roomId, spaceIndex }
   MONOPOLY_SELL_HOUSE: 'monopoly_sell_house', // { roomId, spaceIndex }
+  MONOPOLY_PAY_DEBT: 'monopoly_pay_debt', // { roomId }
+  MONOPOLY_DECLARE_BANKRUPTCY: 'monopoly_declare_bankruptcy', // { roomId }
 } as const;
 
 // Server -> Client events

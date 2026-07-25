@@ -235,13 +235,17 @@ describe('MonopolyEngine', () => {
     });
   });
 
-  describe('bankruptcy', () => {
-    it('bankrupts a player who cannot cover rent, returns their properties, and ends the game', () => {
+  describe('debt and bankruptcy', () => {
+    function stateWithUnaffordableRent(): { state: MonopolyState; expectedRent: number } {
       const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
       state.players[0].position = 37;
       state.players[0].cash = 10;
       state.properties[39].ownerSeat = 1;
-      const expectedRent = BOARD[39].rent![0];
+      return { state, expectedRent: BOARD[39].rent![0] };
+    }
+
+    it('freezes the turn with a pending debt instead of bankrupting immediately', () => {
+      const { state, expectedRent } = stateWithUnaffordableRent();
       mockDiceOnce(1, 1); // doubles: 37 + 2 = 39 (Diamond Heights, owned by seat 1)
       const result = engine.rollDice(
         state as unknown as Record<string, unknown>,
@@ -249,11 +253,94 @@ describe('MonopolyEngine', () => {
         0,
       );
       const after = result.moveResult!.boardState as unknown as MonopolyState;
+      // Nothing paid yet, no one bankrupted yet -- frozen pending a decision.
+      expect(after.players[0].bankrupt).toBe(false);
+      expect(after.players[0].cash).toBe(10);
+      expect(after.players[1].cash).toBe(STARTING_CASH);
+      expect(after.pendingDebt).toEqual({
+        amount: expectedRent,
+        payeeSeat: 1,
+        reason: 'rent',
+      });
+      expect(result.moveResult!.nextTurnSeat).toBe(0);
+      expect(result.moveResult!.isGameOver).toBe(false);
+      // Not "rentPaid" -- nothing was actually paid yet.
+      expect(result.moveResult!.movePayload.debtPending).toBe(expectedRent);
+      expect(result.moveResult!.movePayload.rentPaid).toBeUndefined();
+    });
+
+    it('payDebt settles the debt once enough cash has been raised', () => {
+      const { state, expectedRent } = stateWithUnaffordableRent();
+      mockDiceOnce(1, 1);
+      const rolled = engine.rollDice(state as unknown as Record<string, unknown>, seats, 0);
+      const frozen = rolled.moveResult!.boardState as unknown as MonopolyState;
+      // Raise the cash (as if they'd just mortgaged something).
+      frozen.players[0].cash = expectedRent + 5;
+
+      const result = engine.payDebt(frozen as unknown as Record<string, unknown>, seats, 0);
+      const after = result.boardState as unknown as MonopolyState;
+      expect(after.pendingDebt).toBeNull();
+      expect(after.players[0].cash).toBe(5);
+      expect(after.players[1].cash).toBe(STARTING_CASH + expectedRent);
+      expect(after.players[0].bankrupt).toBe(false);
+      // The roll that caused the debt was doubles, so the extra-roll
+      // entitlement carries through the freeze -- turn stays with seat 0.
+      expect(result.nextTurnSeat).toBe(0);
+    });
+
+    it('payDebt rejects paying without enough cash', () => {
+      const { state } = stateWithUnaffordableRent();
+      mockDiceOnce(1, 1);
+      const rolled = engine.rollDice(state as unknown as Record<string, unknown>, seats, 0);
+      expect(() =>
+        engine.payDebt(rolled.moveResult!.boardState, seats, 0),
+      ).toThrow('You still cannot afford this payment.');
+    });
+
+    it('declareBankruptcy liquidates properties, pays the creditor, and ends the game', () => {
+      const { state, expectedRent } = stateWithUnaffordableRent();
+      state.properties[1].ownerSeat = 0; // an unrelated property seat 0 owns
+      mockDiceOnce(1, 1);
+      const rolled = engine.rollDice(state as unknown as Record<string, unknown>, seats, 0);
+
+      const result = engine.declareBankruptcy(rolled.moveResult!.boardState, seats, 0);
+      const after = result.boardState as unknown as MonopolyState;
       expect(after.players[0].bankrupt).toBe(true);
       expect(after.players[0].cash).toBe(0);
+      expect(after.properties[1].ownerSeat).toBeNull();
       expect(after.players[1].cash).toBe(STARTING_CASH + expectedRent);
-      expect(result.moveResult!.isGameOver).toBe(true);
-      expect(result.moveResult!.winnerSeat).toBe(1);
+      expect(after.pendingDebt).toBeNull();
+      expect(result.isGameOver).toBe(true);
+      expect(result.winnerSeat).toBe(1);
+    });
+
+    it('rejects payDebt/declareBankruptcy when no debt is pending', () => {
+      const state = engine.createInitialState(seats, {});
+      expect(() =>
+        engine.payDebt(state as unknown as Record<string, unknown>, seats, 0),
+      ).toThrow('No debt is pending.');
+      expect(() =>
+        engine.declareBankruptcy(state as unknown as Record<string, unknown>, seats, 0),
+      ).toThrow('No debt is pending.');
+    });
+
+    it('freezes on an unaffordable jail-release fine instead of bankrupting immediately', () => {
+      const state = engine.createInitialState(seats, {}) as unknown as MonopolyState;
+      state.players[0].inJail = true;
+      state.players[0].jailTurns = 2;
+      state.players[0].position = JAIL_SPACE_INDEX;
+      state.players[0].cash = 10;
+      mockDiceOnce(1, 2); // 3rd non-double attempt -> forced fine, can't afford $50
+      const result = engine.rollDice(
+        state as unknown as Record<string, unknown>,
+        seats,
+        0,
+      );
+      const after = result.moveResult!.boardState as unknown as MonopolyState;
+      expect(after.players[0].inJail).toBe(false);
+      expect(after.players[0].cash).toBe(10);
+      expect(after.pendingDebt).toEqual({ amount: 50, payeeSeat: null, reason: 'jail_fine' });
+      expect(result.moveResult!.nextTurnSeat).toBe(0);
     });
   });
 

@@ -140,6 +140,14 @@ function handleMonopolyUnmortgage(spaceIndex: number) {
   roomStore.monopolyUnmortgage(props.id, spaceIndex);
 }
 
+function handleMonopolyPayDebt() {
+  roomStore.monopolyPayDebt(props.id);
+}
+
+function handleMonopolyDeclareBankruptcy() {
+  roomStore.monopolyDeclareBankruptcy(props.id);
+}
+
 function handleMonopolyProposeTrade(offer: {
   toSeat: number;
   offerCash: number;
@@ -199,6 +207,33 @@ function handleCopyCode() {
 }
 
 const gameTypeCode = computed(() => roomStore.room?.gameType.code);
+
+// Monopoly: a purchase decision, auction, or debt freezes gameState.currentTurnSeat
+// on whoever triggered it -- rolling again while one is unresolved would
+// silently corrupt that pending decision, so hide the roll button too
+// (the backend also rejects it defensively).
+const monopolyBlockingDecision = computed(() => {
+  if (gameTypeCode.value !== "monopoly") return false;
+  const state = roomStore.boardState as {
+    pendingPurchase?: unknown;
+    auction?: unknown;
+    pendingDebt?: unknown;
+  } | null;
+  return !!(state?.pendingPurchase || state?.auction || state?.pendingDebt);
+});
+
+// Monopoly: while an auction is running, the *bidder* whose turn it is to
+// act is often a different seat than gameState.currentTurnSeat (the
+// player who declined/couldn't afford the property, whose main turn is
+// just paused). Without this, that bidder's header would misleadingly
+// say "{other player}'s turn..." while it's actually waiting on them.
+const monopolyMyBidTurn = computed(() => {
+  if (gameTypeCode.value !== "monopoly" || myPlayer.value == null) return false;
+  const state = roomStore.boardState as {
+    auction?: { currentBidderSeat: number } | null;
+  } | null;
+  return state?.auction?.currentBidderSeat === myPlayer.value.seatIndex;
+});
 
 // Player-status stats, moved here from inside LudoBoard/SnakesLaddersBoard
 // so the sidebar can render them next to the board on wide screens
@@ -372,6 +407,11 @@ onMounted(() => {
               <strong v-if="isMyTurn" class="turn-badge turn-badge-mine"
                 >Your turn!</strong
               >
+              <strong
+                v-else-if="monopolyMyBidTurn"
+                class="turn-badge turn-badge-bid"
+                >Your bid!</strong
+              >
               <span v-else class="turn-badge">
                 {{
                   roomStore.room.players.find(
@@ -411,7 +451,7 @@ onMounted(() => {
                 :is-rolling="roomStore.isRolling"
               />
               <button
-                v-if="isMyTurn && !roomStore.awaitingMoveChoice"
+                v-if="isMyTurn && !roomStore.awaitingMoveChoice && !monopolyBlockingDecision"
                 class="btn btn-primary"
                 :disabled="roomStore.isRolling"
                 @click="handleRollDice"
@@ -579,6 +619,8 @@ onMounted(() => {
             @sell-house="handleMonopolySellHouse"
             @mortgage="handleMonopolyMortgage"
             @unmortgage="handleMonopolyUnmortgage"
+            @pay-debt="handleMonopolyPayDebt"
+            @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
           />
         </div>
       </div>
@@ -632,6 +674,8 @@ onMounted(() => {
           @sell-house="handleMonopolySellHouse"
           @mortgage="handleMonopolyMortgage"
           @unmortgage="handleMonopolyUnmortgage"
+          @pay-debt="handleMonopolyPayDebt"
+          @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
         />
 
         <div v-if="roomStore.eventLog.length" class="event-log card">
@@ -885,6 +929,25 @@ onMounted(() => {
 .turn-badge-mine {
   color: var(--color-primary);
   font-size: 1.1rem;
+}
+
+/* Distinct from turn-badge-mine on purpose: this means "the main turn is
+   someone else's, but an auction needs your bid right now" -- a visually
+   different cue (amber + pulse) so it doesn't read as your regular turn. */
+.turn-badge-bid {
+  color: #f0b429;
+  font-size: 1.1rem;
+  animation: bid-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes bid-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .turn-timer {

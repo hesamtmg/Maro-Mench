@@ -23,6 +23,8 @@ const emit = defineEmits<{
   "mortgage": [spaceIndex: number];
   "unmortgage": [spaceIndex: number];
   "pay-jail-fine": [];
+  "pay-debt": [];
+  "declare-bankruptcy": [];
   "place-bid": [amount: number];
   "pass-auction": [];
   "propose-trade": [
@@ -74,11 +76,18 @@ interface MonopolyTradeOfferShape {
   requestJailCards: number;
 }
 
+interface MonopolyPendingDebtShape {
+  amount: number;
+  payeeSeat: number | null;
+  reason: 'rent' | 'tax' | 'card' | 'jail_fine';
+}
+
 interface MonopolyStateShape {
   players: Record<number, MonopolyPlayerStateShape>;
   properties: Record<number, MonopolyPropertyStateShape>;
   pendingPurchase: { spaceIndex: number; price: number } | null;
   auction: MonopolyAuctionStateShape | null;
+  pendingDebt: MonopolyPendingDebtShape | null;
   trades: MonopolyTradeOfferShape[];
 }
 
@@ -102,6 +111,11 @@ const pendingBuyerName = computed(() => {
 
 const myPlayerState = computed(() =>
   props.mySeatIndex != null ? state.value?.players?.[props.mySeatIndex] : undefined
+);
+
+const pendingDebt = computed(() => state.value?.pendingDebt ?? null);
+const canPayDebt = computed(
+  () => pendingDebt.value != null && (myPlayerState.value?.cash ?? 0) >= pendingDebt.value.amount
 );
 
 const buildableProperties = computed(() => {
@@ -282,6 +296,28 @@ function submitTrade() {
   showTradeForm.value = false;
 }
 
+function confirmBankruptcy() {
+  if (
+    window.confirm(
+      "Declare bankruptcy? You'll lose every property and be out of the game -- this can't be undone."
+    )
+  ) {
+    emit("declare-bankruptcy");
+  }
+}
+
+function confirmMortgage(spaceIndex: number) {
+  if (window.confirm(`Mortgage this property for $${mortgageValueFor(BOARD[spaceIndex].price)}?`)) {
+    emit("mortgage", spaceIndex);
+  }
+}
+
+function confirmSellHouse(spaceIndex: number, refund: number) {
+  if (window.confirm(`Sell a house on ${BOARD[spaceIndex].name} for $${refund}?`)) {
+    emit("sell-house", spaceIndex);
+  }
+}
+
 function playerColor(seatIndex: number | null): string {
   if (seatIndex == null) return "#999";
   return props.players.find((p) => p.seatIndex === seatIndex)?.color ?? "#999";
@@ -421,6 +457,33 @@ function isCorner(index: number): boolean {
           </p>
         </div>
 
+        <div v-if="pendingDebt" class="ms-action card ms-debt">
+          <p>
+            ⚠️ <strong>{{ isMyTurn ? "You owe" : `${nameForSeat(currentTurnSeat)} owes` }}
+            ${{ pendingDebt.amount }}</strong>
+            <template v-if="pendingDebt.payeeSeat != null">
+              to {{ nameForSeat(pendingDebt.payeeSeat) }}
+            </template>
+            and can't cover it.
+          </p>
+          <template v-if="isMyTurn">
+            <p class="text-muted">Mortgage a property or sell a house to raise cash.</p>
+            <div class="row">
+              <button
+                class="btn btn-primary"
+                :disabled="!canPayDebt"
+                @click="$emit('pay-debt')"
+              >
+                Pay debt
+              </button>
+              <button class="btn btn-danger" @click="confirmBankruptcy">
+                Declare bankruptcy
+              </button>
+            </div>
+          </template>
+          <p v-else class="text-muted">Waiting for them to resolve it…</p>
+        </div>
+
         <div v-if="pendingPurchase && isMyTurn" class="ms-action card">
           <p>
             Buy <strong>{{ pendingSpace?.name }}</strong> for ${{ pendingPurchase.price }}?
@@ -448,7 +511,7 @@ function isCorner(index: number): boolean {
         </div>
 
         <div
-          v-if="isMyTurn && !pendingPurchase && !auction && buildableProperties.length"
+          v-if="isMyTurn && !pendingPurchase && !auction && !pendingDebt && buildableProperties.length"
           class="ms-action card"
         >
           <p class="text-muted">Build a house:</p>
@@ -474,7 +537,7 @@ function isCorner(index: number): boolean {
               v-for="space in sellableProperties"
               :key="space.index"
               class="btn btn-secondary ms-build-btn"
-              @click="$emit('sell-house', space.index)"
+              @click="confirmSellHouse(space.index, Math.floor((space.houseCost ?? 0) / 2))"
             >
               {{ space.name }} (+${{ Math.floor((space.houseCost ?? 0) / 2) }})
             </button>
@@ -491,7 +554,7 @@ function isCorner(index: number): boolean {
               v-for="space in mortgageableProperties"
               :key="space.index"
               class="btn btn-secondary ms-build-btn"
-              @click="$emit('mortgage', space.index)"
+              @click="confirmMortgage(space.index)"
             >
               {{ space.name }} (+${{ mortgageValueFor(space.price) }})
             </button>
@@ -804,6 +867,10 @@ function isCorner(index: number): boolean {
 
 .ms-auction {
   border: 1px solid rgba(240, 180, 41, 0.5);
+}
+
+.ms-debt {
+  border: 1px solid rgba(248, 113, 113, 0.5);
 }
 
 .ms-bid-input {

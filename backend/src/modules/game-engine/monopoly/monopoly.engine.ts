@@ -45,6 +45,12 @@ export interface MonopolyAuctionState {
   originSeat: number;
 }
 
+export interface MonopolyPendingDebt {
+  amount: number;
+  payeeSeat: number | null;
+  reason: 'rent' | 'tax' | 'card' | 'jail_fine';
+}
+
 export interface MonopolyTradeOffer {
   id: string;
   fromSeat: number;
@@ -62,6 +68,7 @@ export interface MonopolyState {
   properties: Record<number, MonopolyPropertyState>;
   pendingPurchase: { spaceIndex: number; price: number } | null;
   auction: MonopolyAuctionState | null;
+  pendingDebt: MonopolyPendingDebt | null;
   trades: MonopolyTradeOffer[];
   extraRollPending: boolean;
   lastCard: { deck: 'chance' | 'chest'; text: string } | null;
@@ -146,44 +153,52 @@ function computeRent(state: MonopolyState, spaceIndex: number): number {
 }
 
 /**
- * Debts are always paid in full by the bank covering any shortfall -- we
- * don't model liquidating specific assets to pay a specific creditor.
- * That's a deliberate simplification for this core-loop version (no
- * trading/auctions yet either); bankruptcy still returns all of the
- * bankrupt player's properties to the bank and removes them from play.
+ * If the player can cover it outright, the charge (and any payee credit)
+ * happens immediately. Otherwise nothing is deducted yet -- the debt is
+ * frozen on the state so the player gets a chance to mortgage properties
+ * or sell houses to raise the cash, via the dedicated payDebt/
+ * declareBankruptcy methods, before the turn can move on. Debts are still
+ * paid in full by the bank covering any shortfall on declareBankruptcy --
+ * we don't model liquidating specific assets to pay a specific creditor.
  */
 function chargePlayer(
   state: MonopolyState,
   seatIndex: number,
   amount: number,
-  payeeSeat?: number,
-): { bankrupt: boolean } {
+  payeeSeat: number | undefined,
+  reason: MonopolyPendingDebt['reason'],
+): { pendingDebt: boolean } {
   const player = state.players[seatIndex];
-  player.cash -= amount;
-  if (payeeSeat != null) {
-    state.players[payeeSeat].cash += amount;
-  }
-  if (player.cash < 0) {
-    for (const space of BOARD) {
-      if (
-        space.type !== 'property' &&
-        space.type !== 'transit' &&
-        space.type !== 'utility'
-      ) {
-        continue;
-      }
-      const propState = state.properties[space.index];
-      if (propState?.ownerSeat === seatIndex) {
-        propState.ownerSeat = null;
-        propState.houses = 0;
-        propState.mortgaged = false;
-      }
+  if (player.cash >= amount) {
+    player.cash -= amount;
+    if (payeeSeat != null) {
+      state.players[payeeSeat].cash += amount;
     }
-    player.bankrupt = true;
-    player.cash = 0;
-    return { bankrupt: true };
+    return { pendingDebt: false };
   }
-  return { bankrupt: false };
+  state.pendingDebt = { amount, payeeSeat: payeeSeat ?? null, reason };
+  return { pendingDebt: true };
+}
+
+/** Shared by declareBankruptcy: returns every owned property to the bank. */
+function liquidateToBank(state: MonopolyState, seatIndex: number): void {
+  for (const space of BOARD) {
+    if (
+      space.type !== 'property' &&
+      space.type !== 'transit' &&
+      space.type !== 'utility'
+    ) {
+      continue;
+    }
+    const propState = state.properties[space.index];
+    if (propState?.ownerSeat === seatIndex) {
+      propState.ownerSeat = null;
+      propState.houses = 0;
+      propState.mortgaged = false;
+    }
+  }
+  state.players[seatIndex].bankrupt = true;
+  state.players[seatIndex].cash = 0;
 }
 
 @Injectable()
@@ -226,6 +241,7 @@ export class MonopolyEngine implements GameEngine {
       properties,
       pendingPurchase: null,
       auction: null,
+      pendingDebt: null,
       trades: [],
       extraRollPending: false,
       lastCard: null,
@@ -271,20 +287,24 @@ export class MonopolyEngine implements GameEngine {
       } else {
         player.jailTurns += 1;
         if (player.jailTurns >= MAX_JAIL_TURNS) {
-          const result = chargePlayer(state, seatIndex, JAIL_FINE);
+          const result = chargePlayer(state, seatIndex, JAIL_FINE, undefined, 'jail_fine');
           player.inJail = false;
           player.jailTurns = 0;
           movePayload.jailEvent = 'forced_fine';
-          if (result.bankrupt) {
-            const nextSeat = nextActiveSeat(seats, state, seatIndex);
-            const active = activeSeats(seats, state);
+          if (result.pendingDebt) {
+            // Can't cover the fine outright -- freeze here so they can
+            // mortgage/sell to raise it (or declare bankruptcy) before
+            // anything else happens this turn.
+            movePayload.debtPending = JAIL_FINE;
             return {
               diceValue: sum,
               autoResolved: true,
-              moveResult: this.finish(state, nextSeat, active, seatIndex, {
-                ...movePayload,
-                wentBankrupt: true,
-              }),
+              moveResult: {
+                boardState: state as unknown as Record<string, unknown>,
+                nextTurnSeat: seatIndex,
+                isGameOver: false,
+                movePayload,
+              },
             };
           }
         } else {
@@ -348,7 +368,7 @@ export class MonopolyEngine implements GameEngine {
       };
     }
 
-    if (state.pendingPurchase || state.auction) {
+    if (state.pendingPurchase || state.auction || state.pendingDebt) {
       return {
         diceValue: sum,
         autoResolved: true,
@@ -490,6 +510,58 @@ export class MonopolyEngine implements GameEngine {
     player.jailTurns = 0;
 
     return state as unknown as Record<string, unknown>;
+  }
+
+  /** Called by the gateway once a player has raised enough cash to cover a pending debt. */
+  payDebt(
+    boardStateIn: Record<string, unknown>,
+    seats: RoomPlayerSeat[],
+    seatIndex: number,
+  ): MoveResult {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const debt = state.pendingDebt;
+    if (!debt) throw new Error('No debt is pending.');
+    const player = state.players[seatIndex];
+    if (player.cash < debt.amount) {
+      throw new Error('You still cannot afford this payment.');
+    }
+
+    player.cash -= debt.amount;
+    if (debt.payeeSeat != null) {
+      state.players[debt.payeeSeat].cash += debt.amount;
+    }
+    state.pendingDebt = null;
+
+    const active = activeSeats(seats, state);
+    const fallbackNextSeat = nextActiveSeat(seats, state, seatIndex);
+    return this.finish(state, fallbackNextSeat, active, seatIndex, {
+      debtPaid: debt.amount,
+    });
+  }
+
+  /** Called by the gateway when a player can't (or chooses not to) cover a pending debt. */
+  declareBankruptcy(
+    boardStateIn: Record<string, unknown>,
+    seats: RoomPlayerSeat[],
+    seatIndex: number,
+  ): MoveResult {
+    const state = cloneState(boardStateIn as unknown as MonopolyState);
+    const debt = state.pendingDebt;
+    if (!debt) throw new Error('No debt is pending.');
+
+    // The payee still gets paid in full (the bank covers the shortfall --
+    // the same simplification chargePlayer uses when it can pay outright).
+    if (debt.payeeSeat != null) {
+      state.players[debt.payeeSeat].cash += debt.amount;
+    }
+    liquidateToBank(state, seatIndex);
+    state.pendingDebt = null;
+
+    const active = activeSeats(seats, state);
+    const fallbackNextSeat = nextActiveSeat(seats, state, seatIndex);
+    return this.finish(state, fallbackNextSeat, active, seatIndex, {
+      wentBankrupt: true,
+    });
   }
 
   /** Called by the gateway when a player mortgages an owned, house-free property for half its price. */
@@ -818,10 +890,16 @@ export class MonopolyEngine implements GameEngine {
         movePayload.sentToJail = 'go_to_jail_space';
         return;
 
-      case 'tax':
-        chargePlayer(state, seatIndex, space.taxAmount ?? 0);
-        movePayload.taxPaid = space.taxAmount;
+      case 'tax': {
+        const amount = space.taxAmount ?? 0;
+        const result = chargePlayer(state, seatIndex, amount, undefined, 'tax');
+        if (result.pendingDebt) {
+          movePayload.debtPending = amount;
+        } else {
+          movePayload.taxPaid = amount;
+        }
         return;
+      }
 
       case 'chance':
       case 'chest': {
@@ -829,7 +907,10 @@ export class MonopolyEngine implements GameEngine {
         const card = deck[Math.floor(Math.random() * deck.length)];
         state.lastCard = { deck: space.type, text: card.text };
         movePayload.card = card.text;
-        this.applyCard(state, seatIndex, card);
+        const cardResult = this.applyCard(state, seatIndex, card);
+        if (cardResult.pendingDebt) {
+          movePayload.debtPending = card.type === 'pay' ? card.amount : 0;
+        }
         return;
       }
 
@@ -854,9 +935,13 @@ export class MonopolyEngine implements GameEngine {
           return;
         }
         const rent = computeRent(state, space.index);
-        chargePlayer(state, seatIndex, rent, propState.ownerSeat);
-        movePayload.rentPaid = rent;
-        movePayload.rentPaidTo = propState.ownerSeat;
+        const result = chargePlayer(state, seatIndex, rent, propState.ownerSeat, 'rent');
+        if (result.pendingDebt) {
+          movePayload.debtPending = rent;
+        } else {
+          movePayload.rentPaid = rent;
+          movePayload.rentPaidTo = propState.ownerSeat;
+        }
         return;
       }
     }
@@ -866,28 +951,27 @@ export class MonopolyEngine implements GameEngine {
     state: MonopolyState,
     seatIndex: number,
     card: CardEffect,
-  ): void {
+  ): { pendingDebt: boolean } {
     const player = state.players[seatIndex];
     switch (card.type) {
       case 'collect':
         player.cash += card.amount;
-        return;
+        return { pendingDebt: false };
       case 'pay':
-        chargePlayer(state, seatIndex, card.amount);
-        return;
+        return chargePlayer(state, seatIndex, card.amount, undefined, 'card');
       case 'advance_to_go':
         player.position = 0;
         player.cash += GO_BONUS;
-        return;
+        return { pendingDebt: false };
       case 'go_to_jail':
         player.position = JAIL_SPACE_INDEX;
         player.inJail = true;
         player.doublesStreak = 0;
         state.extraRollPending = false;
-        return;
+        return { pendingDebt: false };
       case 'get_out_of_jail_free':
         player.jailFreeCards += 1;
-        return;
+        return { pendingDebt: false };
     }
   }
 

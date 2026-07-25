@@ -25,6 +25,8 @@ export const WS_EVENTS_IN = {
   MONOPOLY_MORTGAGE: 'monopoly_mortgage',
   MONOPOLY_UNMORTGAGE: 'monopoly_unmortgage',
   MONOPOLY_SELL_HOUSE: 'monopoly_sell_house',
+  MONOPOLY_PAY_DEBT: 'monopoly_pay_debt',
+  MONOPOLY_DECLARE_BANKRUPTCY: 'monopoly_declare_bankruptcy',
 } as const;
 
 export const WS_EVENTS_OUT = {

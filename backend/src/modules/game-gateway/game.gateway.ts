@@ -380,6 +380,16 @@ export class GameGateway
       return;
     }
 
+    if (room.gameType.code === GameTypeCode.MONOPOLY && this.hasMonopolyPendingDecision(gameState.boardState)) {
+      // A purchase decision, auction, or debt is frozen on this exact
+      // seat -- re-rolling here would silently move past it (or double
+      // up a second landing effect) instead of resolving it first.
+      socket.emit(WS_EVENTS_OUT.ERROR, {
+        message: 'Resolve the pending decision before rolling again',
+      });
+      return;
+    }
+
     this.scheduler.clearTurnTimeout(room.id);
 
     const engine = this.gameEngineFactory.getEngine(room.gameType.code);
@@ -680,6 +690,64 @@ export class GameGateway
     }
   }
 
+  /** Monopoly-only: pays off a pending debt once enough cash has been raised. Resumes the main turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_PAY_DEBT)
+  async onMonopolyPayDebt(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+    const seats = this.gameStateService.toSeats(room.players);
+
+    try {
+      const moveResult = this.monopolyEngine.payDebt(
+        gameState.boardState,
+        seats,
+        player.seatIndex,
+      );
+      this.scheduler.clearTurnTimeout(room.id);
+      await this.applyAndBroadcastMove(room, gameState, player.seatIndex, 0, moveResult);
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Monopoly-only: gives up on a pending debt, liquidating to the bank. Resumes the main turn. */
+  @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_DECLARE_BANKRUPTCY)
+  async onMonopolyDeclareBankruptcy(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+    const seats = this.gameStateService.toSeats(room.players);
+
+    try {
+      const moveResult = this.monopolyEngine.declareBankruptcy(
+        gameState.boardState,
+        seats,
+        player.seatIndex,
+      );
+      this.scheduler.clearTurnTimeout(room.id);
+      await this.applyAndBroadcastMove(room, gameState, player.seatIndex, 0, moveResult);
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   /** Monopoly-only: pays the jail fine (or spends a get-out-of-jail card). Doesn't consume the turn. */
   @SubscribeMessage(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE)
   async onMonopolyPayJailFine(
@@ -963,7 +1031,26 @@ export class GameGateway
     const state = gameState.boardState as {
       auction?: { currentBidderSeat: number } | null;
       pendingPurchase?: unknown;
+      pendingDebt?: unknown;
     };
+
+    if (state.pendingDebt) {
+      // Left hanging on a debt they could raise cash for -- default to
+      // bankruptcy rather than let the game stall forever.
+      const debtorSeat = gameState.currentTurnSeat;
+      const moveResult = this.monopolyEngine.declareBankruptcy(
+        gameState.boardState,
+        seats,
+        debtorSeat,
+      );
+      this.server.to(room.id).emit(WS_EVENTS_OUT.TURN_SKIPPED, {
+        seatIndex: debtorSeat,
+        reason,
+        nextTurnSeat: gameState.currentTurnSeat,
+      });
+      await this.applyAndBroadcastMove(room, gameState, debtorSeat, 0, moveResult);
+      return true;
+    }
 
     if (state.auction) {
       const bidderSeat = state.auction.currentBidderSeat;
@@ -1016,6 +1103,15 @@ export class GameGateway
     }
 
     return false;
+  }
+
+  private hasMonopolyPendingDecision(boardState: Record<string, unknown>): boolean {
+    const state = boardState as {
+      pendingPurchase?: unknown;
+      auction?: unknown;
+      pendingDebt?: unknown;
+    };
+    return !!(state.pendingPurchase || state.auction || state.pendingDebt);
   }
 
   private scheduleTurnTimeoutFor(roomId: string) {

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { GameEngineFactory } from '../game-engine/game-engine.factory';
+import { BOARD, HOTEL_LEVEL } from '../game-engine/monopoly/board-config';
 import { MonopolyEngine } from '../game-engine/monopoly/monopoly.engine';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
 import { GameTypeCode } from '../rooms/entities/game-type.entity';
@@ -592,9 +593,17 @@ export class GameGateway
         payload.spaceIndex,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      const houses = (
+        boardState as unknown as {
+          properties: Record<number, { houses: number }>;
+        }
+      ).properties[payload.spaceIndex].houses;
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        builtHouse: BOARD[payload.spaceIndex].name,
+        isHotel: houses >= HOTEL_LEVEL,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -622,9 +631,11 @@ export class GameGateway
         payload.spaceIndex,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        soldHouse: BOARD[payload.spaceIndex].name,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -652,9 +663,11 @@ export class GameGateway
         payload.spaceIndex,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        mortgaged: BOARD[payload.spaceIndex].name,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -682,9 +695,11 @@ export class GameGateway
         payload.spaceIndex,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        unmortgaged: BOARD[payload.spaceIndex].name,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -769,9 +784,11 @@ export class GameGateway
         player.seatIndex,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        paidJailFine: true,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -802,9 +819,15 @@ export class GameGateway
         payload.amount,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      const auctionSpaceIndex = (
+        boardState as unknown as { auction: { spaceIndex: number } }
+      ).auction.spaceIndex;
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        bidPlaced: payload.amount,
+        bidSpace: BOARD[auctionSpaceIndex].name,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -844,9 +867,14 @@ export class GameGateway
         await this.gameStateService.updateGameState(gameState, {
           boardState: result.boardState,
         });
-        this.server
-          .to(room.id)
-          .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState: result.boardState });
+        const auctionSpaceIndex = (
+          result.boardState as unknown as { auction: { spaceIndex: number } }
+        ).auction.spaceIndex;
+        this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+          boardState: result.boardState,
+          seatIndex: player.seatIndex,
+          auctionPassed: BOARD[auctionSpaceIndex].name,
+        });
       }
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
@@ -885,9 +913,11 @@ export class GameGateway
         payload,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        tradeProposedTo: payload.toSeat,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -908,6 +938,19 @@ export class GameGateway
     const gameState = await this.gameStateService.getGameState(room.id);
 
     try {
+      const trades = (
+        gameState.boardState as unknown as {
+          trades: Array<{ id: string; fromSeat: number; toSeat: number }>;
+        }
+      ).trades;
+      const trade = trades.find((t) => t.id === payload.tradeId);
+      const otherSeat =
+        trade == null
+          ? null
+          : trade.fromSeat === player.seatIndex
+            ? trade.toSeat
+            : trade.fromSeat;
+
       const boardState = this.monopolyEngine.respondToTrade(
         gameState.boardState,
         player.seatIndex,
@@ -915,9 +958,12 @@ export class GameGateway
         payload.accept,
       );
       await this.gameStateService.updateGameState(gameState, { boardState });
-      this.server
-        .to(room.id)
-        .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        tradeResponded: payload.accept,
+        tradeWithSeat: otherSeat,
+      });
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }

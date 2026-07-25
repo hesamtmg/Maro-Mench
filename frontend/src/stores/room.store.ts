@@ -73,6 +73,61 @@ interface OloShotResultEvent {
 
 interface MonopolyStateUpdatedEvent {
   boardState: Record<string, unknown>;
+  seatIndex?: number;
+  builtHouse?: string;
+  isHotel?: boolean;
+  soldHouse?: string;
+  mortgaged?: string;
+  unmortgaged?: string;
+  paidJailFine?: boolean;
+  bidPlaced?: number;
+  bidSpace?: string;
+  auctionPassed?: string;
+  tradeProposedTo?: number;
+  tradeResponded?: boolean;
+  tradeWithSeat?: number | null;
+}
+
+// These actions (build/sell/mortgage/etc.) don't consume the turn, so
+// they arrive via MONOPOLY_STATE_UPDATED instead of MOVE_APPLIED --
+// mirrors monopolyEventMessage/monopolyEventSound's style, just keyed
+// off this event's own fields.
+function monopolyStateEventMessage(
+  payload: MonopolyStateUpdatedEvent,
+  room: Room | null,
+): string | null {
+  const name =
+    payload.seatIndex != null ? displayNameForSeat(room, payload.seatIndex) : 'A player';
+  if (payload.builtHouse) {
+    return payload.isHotel
+      ? `🏨 ${name} built a hotel on ${payload.builtHouse}.`
+      : `🏠 ${name} built a house on ${payload.builtHouse}.`;
+  }
+  if (payload.soldHouse) return `💰 ${name} sold a house on ${payload.soldHouse}.`;
+  if (payload.mortgaged) return `🏦 ${name} mortgaged ${payload.mortgaged}.`;
+  if (payload.unmortgaged) return `🏦 ${name} paid off the mortgage on ${payload.unmortgaged}.`;
+  if (payload.paidJailFine) return `🔓 ${name} paid $50 and left jail.`;
+  if (payload.bidPlaced != null) return `💰 ${name} bid $${payload.bidPlaced} on ${payload.bidSpace}.`;
+  if (payload.auctionPassed) return `🙅 ${name} passed on the auction for ${payload.auctionPassed}.`;
+  if (payload.tradeProposedTo != null) {
+    return `🤝 ${name} proposed a trade to ${displayNameForSeat(room, payload.tradeProposedTo)}.`;
+  }
+  if (payload.tradeResponded != null) {
+    return payload.tradeResponded
+      ? `🤝 ${name} accepted a trade.`
+      : `🙅 ${name} declined a trade.`;
+  }
+  return null;
+}
+
+function monopolyStateEventSound(payload: MonopolyStateUpdatedEvent) {
+  if (payload.builtHouse) return playHammerTap();
+  if (payload.soldHouse) return playCoin();
+  if (payload.mortgaged) return playCoin();
+  if (payload.unmortgaged) return playCoin();
+  if (payload.paidJailFine) return playCoin();
+  if (payload.bidPlaced != null) return playGavel();
+  if (payload.tradeResponded === true) return playCashRegister();
 }
 
 export interface EventLogEntry {
@@ -427,6 +482,11 @@ export const useRoomStore = defineStore('room', {
         WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED,
         (payload: MonopolyStateUpdatedEvent) => {
           this.boardState = payload.boardState;
+          const message = monopolyStateEventMessage(payload, this.room);
+          if (message) {
+            this.pushEvent(message);
+            monopolyStateEventSound(payload);
+          }
         },
       );
 
@@ -484,17 +544,17 @@ export const useRoomStore = defineStore('room', {
     },
 
     monopolyBuildHouse(roomId: string, spaceIndex: number) {
-      playHammerTap();
+      // Sound/log entry arrive via the MONOPOLY_STATE_UPDATED broadcast
+      // (which reaches the sender too), so no optimistic playback here --
+      // avoids double-playing the sound for the acting player.
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_BUILD_HOUSE, { roomId, spaceIndex });
     },
 
     monopolyPayJailFine(roomId: string) {
-      playCoin();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE, { roomId });
     },
 
     monopolyPlaceBid(roomId: string, amount: number) {
-      playGavel();
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_PLACE_BID, { roomId, amount });
     },
 

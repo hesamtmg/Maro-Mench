@@ -3,8 +3,15 @@ import { connectSocket, getSocket } from '../api/socket.client';
 import { WS_EVENTS_IN, WS_EVENTS_OUT } from '../api/ws-events.constants';
 import {
   playAhh,
+  playBankruptSting,
+  playCardFlip,
+  playCashRegister,
+  playCoin,
   playCrash,
+  playGavel,
+  playHammerTap,
   playHooray,
+  playJailClang,
   playStairs,
   playSwallow,
   playVictoryFanfare,
@@ -64,6 +71,65 @@ interface OloShotResultEvent {
   nextTurnSeat: number;
 }
 
+interface MonopolyStateUpdatedEvent {
+  boardState: Record<string, unknown>;
+  seatIndex?: number;
+  builtHouse?: string;
+  isHotel?: boolean;
+  soldHouse?: string;
+  mortgaged?: string;
+  unmortgaged?: string;
+  paidJailFine?: boolean;
+  bidPlaced?: number;
+  bidSpace?: string;
+  auctionPassed?: string;
+  tradeProposedTo?: number;
+  tradeResponded?: boolean;
+  tradeWithSeat?: number | null;
+}
+
+// These actions (build/sell/mortgage/etc.) don't consume the turn, so
+// they arrive via MONOPOLY_STATE_UPDATED instead of MOVE_APPLIED --
+// mirrors monopolyEventMessage/monopolyEventSound's style, just keyed
+// off this event's own fields.
+function monopolyStateEventMessage(
+  payload: MonopolyStateUpdatedEvent,
+  room: Room | null,
+): string | null {
+  const name =
+    payload.seatIndex != null ? displayNameForSeat(room, payload.seatIndex) : 'A player';
+  if (payload.builtHouse) {
+    return payload.isHotel
+      ? `🏨 ${name} built a hotel on ${payload.builtHouse}.`
+      : `🏠 ${name} built a house on ${payload.builtHouse}.`;
+  }
+  if (payload.soldHouse) return `💰 ${name} sold a house on ${payload.soldHouse}.`;
+  if (payload.mortgaged) return `🏦 ${name} mortgaged ${payload.mortgaged}.`;
+  if (payload.unmortgaged) return `🏦 ${name} paid off the mortgage on ${payload.unmortgaged}.`;
+  if (payload.paidJailFine) return `🔓 ${name} paid $50 and left jail.`;
+  if (payload.bidPlaced != null) return `💰 ${name} bid $${payload.bidPlaced} on ${payload.bidSpace}.`;
+  if (payload.auctionPassed) return `🙅 ${name} passed on the auction for ${payload.auctionPassed}.`;
+  if (payload.tradeProposedTo != null) {
+    return `🤝 ${name} proposed a trade to ${displayNameForSeat(room, payload.tradeProposedTo)}.`;
+  }
+  if (payload.tradeResponded != null) {
+    return payload.tradeResponded
+      ? `🤝 ${name} accepted a trade.`
+      : `🙅 ${name} declined a trade.`;
+  }
+  return null;
+}
+
+function monopolyStateEventSound(payload: MonopolyStateUpdatedEvent) {
+  if (payload.builtHouse) return playHammerTap();
+  if (payload.soldHouse) return playCoin();
+  if (payload.mortgaged) return playCoin();
+  if (payload.unmortgaged) return playCoin();
+  if (payload.paidJailFine) return playCoin();
+  if (payload.bidPlaced != null) return playGavel();
+  if (payload.tradeResponded === true) return playCashRegister();
+}
+
 export interface EventLogEntry {
   id: number;
   message: string;
@@ -101,6 +167,63 @@ interface RoomState {
   // whichever player is mid-shot, for OloBoard to render while spectating
   // (not persisted -- overwritten by each new packet).
   oloLiveOpponentPositions: OloLivePositionsEvent | null;
+  // Monopoly only: the two individual d6 values from the last roll --
+  // lastDiceValue is their *sum* (up to 12), which doesn't fit the
+  // 1-6 pip die widget, so Monopoly renders two dice from this instead.
+  monopolyDice: [number, number] | null;
+}
+
+// Mirrors monopolyEventMessage's priority order, one sound per outcome.
+function monopolyEventSound(payload: Record<string, unknown>) {
+  if (payload.auctionWinner !== undefined) {
+    if (payload.auctionWinner == null) playAhh();
+    else playCashRegister();
+    return;
+  }
+  if (payload.auctionStarted) return playGavel();
+  if (payload.wentBankrupt) return playBankruptSting();
+  if (payload.debtPending) return playAhh();
+  if (payload.debtPaid) return playCoin();
+  if (payload.sentToJail) return playJailClang();
+  if (payload.jailEvent === 'rolled_out') return playHooray();
+  if (payload.jailEvent === 'forced_fine') return playCoin();
+  if (payload.jailEvent === 'stayed') return playJailClang();
+  if (payload.purchased === true) return playCashRegister();
+  if (payload.card) return playCardFlip();
+  if (payload.taxPaid) return playCoin();
+  if (payload.rentPaid) return playCoin();
+}
+
+function monopolyEventMessage(
+  name: string,
+  payload: Record<string, unknown>,
+  room: Room | null,
+): string {
+  if (payload.auctionWinner !== undefined) {
+    if (payload.auctionWinner == null) return `🔨 Auction closed with no bids.`;
+    const winnerName = displayNameForSeat(room, payload.auctionWinner as number);
+    return `🔨 ${winnerName} won the auction for $${payload.auctionPrice}.`;
+  }
+  if (payload.auctionStarted) return `🔨 ${name} passed -- going to auction.`;
+  if (payload.skipped) return `⏭️ ${name} has no properties left to lose -- skipped.`;
+  if (payload.wentBankrupt) return `💸 ${name} went bankrupt!`;
+  if (payload.debtPending) return `⚠️ ${name} owes $${payload.debtPending} and can't cover it!`;
+  if (payload.debtPaid) return `💰 ${name} paid off a $${payload.debtPaid} debt.`;
+  if (payload.sentToJail) return `🚔 ${name} was sent to jail.`;
+  if (payload.jailEvent === 'rolled_out') {
+    return `🎲 ${name} rolled doubles and got out of jail!`;
+  }
+  if (payload.jailEvent === 'forced_fine') {
+    return `💰 ${name} paid the fine to leave jail.`;
+  }
+  if (payload.jailEvent === 'stayed') return `⛓️ ${name} stayed in jail.`;
+  if (payload.purchased === true) return `🏠 ${name} bought a property.`;
+  if (payload.purchased === false) return `🙅 ${name} declined to buy.`;
+  if (payload.card) return `🃏 ${name} drew a card: ${payload.card as string}`;
+  if (payload.taxPaid) return `🧾 ${name} paid $${payload.taxPaid} in tax.`;
+  if (payload.rentPaid) return `💵 ${name} paid $${payload.rentPaid} in rent.`;
+  if (payload.landedOn) return `♟️ ${name} landed on ${payload.landedOn as string}.`;
+  return `♟️ ${name} moved.`;
 }
 
 function displayNameForSeat(room: Room | null, seatIndex: number): string {
@@ -129,6 +252,7 @@ export const useRoomStore = defineStore('room', {
     eventLog: [],
     celebration: null,
     oloLiveOpponentPositions: null,
+    monopolyDice: null,
   }),
 
   actions: {
@@ -167,6 +291,7 @@ export const useRoomStore = defineStore('room', {
         this.awaitingMoveChoice = false;
         this.awaitingDiceValue = null;
         this.isRolling = false;
+        this.monopolyDice = null;
         this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
         toastStore.success('The game has started!');
         this.pushEvent('🎲 The game has started!');
@@ -224,7 +349,17 @@ export const useRoomStore = defineStore('room', {
           ladders?: Record<number, number>;
         };
 
-        if (movePayload.noLegalMove) {
+        const isMonopoly = this.room?.gameType.code === 'monopoly';
+
+        if (isMonopoly) {
+          const die1 = movePayload.die1 as number | undefined;
+          const die2 = movePayload.die2 as number | undefined;
+          if (die1 != null && die2 != null) {
+            this.monopolyDice = [die1, die2];
+          }
+          this.pushEvent(monopolyEventMessage(name, movePayload, this.room));
+          monopolyEventSound(movePayload);
+        } else if (movePayload.noLegalMove) {
           this.pushEvent(`↪️ ${name} had no legal move.`);
           playAhh();
         } else if (captured && captured.length > 0) {
@@ -340,6 +475,21 @@ export const useRoomStore = defineStore('room', {
         this.pushEvent(`🥏 ${name} took a shot.`);
       });
 
+      // Monopoly only: building a house or paying the jail fine changes
+      // boardState without consuming the turn, so it's a separate event
+      // from MOVE_APPLIED (which always carries a nextTurnSeat change).
+      socket.on(
+        WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED,
+        (payload: MonopolyStateUpdatedEvent) => {
+          this.boardState = payload.boardState;
+          const message = monopolyStateEventMessage(payload, this.room);
+          if (message) {
+            this.pushEvent(message);
+            monopolyStateEventSound(payload);
+          }
+        },
+      );
+
       this.listenersBound = true;
     },
 
@@ -389,6 +539,73 @@ export const useRoomStore = defineStore('room', {
       getSocket().emit(WS_EVENTS_IN.OLO_SHOT_RESULT, { roomId, ...payload });
     },
 
+    monopolyPurchaseDecision(roomId: string, buy: boolean) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PURCHASE_DECISION, { roomId, buy });
+    },
+
+    monopolyBuildHouse(roomId: string, spaceIndex: number) {
+      // Sound/log entry arrive via the MONOPOLY_STATE_UPDATED broadcast
+      // (which reaches the sender too), so no optimistic playback here --
+      // avoids double-playing the sound for the acting player.
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_BUILD_HOUSE, { roomId, spaceIndex });
+    },
+
+    monopolyPayJailFine(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_JAIL_FINE, { roomId });
+    },
+
+    monopolyPlaceBid(roomId: string, amount: number) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PLACE_BID, { roomId, amount });
+    },
+
+    monopolyPassAuction(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PASS_AUCTION, { roomId });
+    },
+
+    monopolyProposeTrade(
+      roomId: string,
+      offer: {
+        toSeat: number;
+        offerCash: number;
+        offerProperties: number[];
+        offerJailCards: number;
+        requestCash: number;
+        requestProperties: number[];
+        requestJailCards: number;
+      },
+    ) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PROPOSE_TRADE, { roomId, ...offer });
+    },
+
+    monopolyRespondTrade(roomId: string, tradeId: string, accept: boolean) {
+      if (accept) playCashRegister();
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_RESPOND_TRADE, { roomId, tradeId, accept });
+    },
+
+    monopolyMortgage(roomId: string, spaceIndex: number) {
+      playCashRegister();
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_MORTGAGE, { roomId, spaceIndex });
+    },
+
+    monopolyUnmortgage(roomId: string, spaceIndex: number) {
+      playCoin();
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_UNMORTGAGE, { roomId, spaceIndex });
+    },
+
+    monopolySellHouse(roomId: string, spaceIndex: number) {
+      playCoin();
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_SELL_HOUSE, { roomId, spaceIndex });
+    },
+
+    monopolyPayDebt(roomId: string) {
+      playCoin();
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_PAY_DEBT, { roomId });
+    },
+
+    monopolyDeclareBankruptcy(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.MONOPOLY_DECLARE_BANKRUPTCY, { roomId });
+    },
+
     kickPlayer(roomId: string, targetUserId: string) {
       getSocket().emit(WS_EVENTS_IN.KICK_PLAYER, { roomId, targetUserId });
     },
@@ -411,6 +628,7 @@ export const useRoomStore = defineStore('room', {
       if (celebrationTimer) clearTimeout(celebrationTimer);
       this.celebration = null;
       this.oloLiveOpponentPositions = null;
+      this.monopolyDice = null;
     },
   },
 });

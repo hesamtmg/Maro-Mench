@@ -15,6 +15,18 @@ export const WS_EVENTS_IN = {
   CANCEL_QUEUE: 'cancel_queue',
   OLO_LIVE_POSITIONS: 'olo_live_positions',
   OLO_SHOT_RESULT: 'olo_shot_result',
+  MONOPOLY_PURCHASE_DECISION: 'monopoly_purchase_decision',
+  MONOPOLY_BUILD_HOUSE: 'monopoly_build_house',
+  MONOPOLY_PAY_JAIL_FINE: 'monopoly_pay_jail_fine',
+  MONOPOLY_PLACE_BID: 'monopoly_place_bid',
+  MONOPOLY_PASS_AUCTION: 'monopoly_pass_auction',
+  MONOPOLY_PROPOSE_TRADE: 'monopoly_propose_trade',
+  MONOPOLY_RESPOND_TRADE: 'monopoly_respond_trade',
+  MONOPOLY_MORTGAGE: 'monopoly_mortgage',
+  MONOPOLY_UNMORTGAGE: 'monopoly_unmortgage',
+  MONOPOLY_SELL_HOUSE: 'monopoly_sell_house',
+  MONOPOLY_PAY_DEBT: 'monopoly_pay_debt',
+  MONOPOLY_DECLARE_BANKRUPTCY: 'monopoly_declare_bankruptcy',
 } as const;
 
 export const WS_EVENTS_OUT = {
@@ -38,4 +50,5 @@ export const WS_EVENTS_OUT = {
   ERROR: 'error_event',
   OLO_LIVE_POSITIONS: 'olo_live_positions',
   OLO_SHOT_RESULT: 'olo_shot_result',
+  MONOPOLY_STATE_UPDATED: 'monopoly_state_updated',
 } as const;

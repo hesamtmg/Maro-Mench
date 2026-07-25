@@ -5,6 +5,13 @@ import { roomsApi } from "../api/rooms.api";
 import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
+import MonopolyBoard from "../components/MonopolyBoard.vue";
+import {
+  BOARD as MONOPOLY_BOARD,
+  GROUP_COLORS as MONOPOLY_GROUP_COLORS,
+  HOTEL_LEVEL as MONOPOLY_HOTEL_LEVEL,
+  tokenIconForSeat,
+} from "../components/monopoly/board-config";
 import OloBoard from "../components/OloBoard.vue";
 import PlayerList from "../components/PlayerList.vue";
 import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
@@ -106,6 +113,62 @@ function handleOloShotResult(payload: {
   });
 }
 
+function handleMonopolyBuyDecision(buy: boolean) {
+  roomStore.monopolyPurchaseDecision(props.id, buy);
+}
+
+function handleMonopolyBuildHouse(spaceIndex: number) {
+  roomStore.monopolyBuildHouse(props.id, spaceIndex);
+}
+
+function handleMonopolyPayJailFine() {
+  roomStore.monopolyPayJailFine(props.id);
+}
+
+function handleMonopolyPlaceBid(amount: number) {
+  roomStore.monopolyPlaceBid(props.id, amount);
+}
+
+function handleMonopolyPassAuction() {
+  roomStore.monopolyPassAuction(props.id);
+}
+
+function handleMonopolySellHouse(spaceIndex: number) {
+  roomStore.monopolySellHouse(props.id, spaceIndex);
+}
+
+function handleMonopolyMortgage(spaceIndex: number) {
+  roomStore.monopolyMortgage(props.id, spaceIndex);
+}
+
+function handleMonopolyUnmortgage(spaceIndex: number) {
+  roomStore.monopolyUnmortgage(props.id, spaceIndex);
+}
+
+function handleMonopolyPayDebt() {
+  roomStore.monopolyPayDebt(props.id);
+}
+
+function handleMonopolyDeclareBankruptcy() {
+  roomStore.monopolyDeclareBankruptcy(props.id);
+}
+
+function handleMonopolyProposeTrade(offer: {
+  toSeat: number;
+  offerCash: number;
+  offerProperties: number[];
+  offerJailCards: number;
+  requestCash: number;
+  requestProperties: number[];
+  requestJailCards: number;
+}) {
+  roomStore.monopolyProposeTrade(props.id, offer);
+}
+
+function handleMonopolyRespondTrade(tradeId: string, accept: boolean) {
+  roomStore.monopolyRespondTrade(props.id, tradeId, accept);
+}
+
 async function handleLeaveRoom() {
   roomStore.leaveRoom(props.id);
   await router.push({ name: "lobby" });
@@ -150,6 +213,33 @@ function handleCopyCode() {
 
 const gameTypeCode = computed(() => roomStore.room?.gameType.code);
 
+// Monopoly: a purchase decision, auction, or debt freezes gameState.currentTurnSeat
+// on whoever triggered it -- rolling again while one is unresolved would
+// silently corrupt that pending decision, so hide the roll button too
+// (the backend also rejects it defensively).
+const monopolyBlockingDecision = computed(() => {
+  if (gameTypeCode.value !== "monopoly") return false;
+  const state = roomStore.boardState as {
+    pendingPurchase?: unknown;
+    auction?: unknown;
+    pendingDebt?: unknown;
+  } | null;
+  return !!(state?.pendingPurchase || state?.auction || state?.pendingDebt);
+});
+
+// Monopoly: while an auction is running, the *bidder* whose turn it is to
+// act is often a different seat than gameState.currentTurnSeat (the
+// player who declined/couldn't afford the property, whose main turn is
+// just paused). Without this, that bidder's header would misleadingly
+// say "{other player}'s turn..." while it's actually waiting on them.
+const monopolyMyBidTurn = computed(() => {
+  if (gameTypeCode.value !== "monopoly" || myPlayer.value == null) return false;
+  const state = roomStore.boardState as {
+    auction?: { currentBidderSeat: number } | null;
+  } | null;
+  return state?.auction?.currentBidderSeat === myPlayer.value.seatIndex;
+});
+
 // Player-status stats, moved here from inside LudoBoard/SnakesLaddersBoard
 // so the sidebar can render them next to the board on wide screens
 // instead of only below it.
@@ -182,6 +272,91 @@ function oloScore(seatIndex: number): number {
     scores?: Record<number, number>;
   } | null;
   return state?.scores?.[seatIndex] ?? 0;
+}
+
+function monopolyCash(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    players?: Record<number, { cash: number; bankrupt: boolean }>;
+  } | null;
+  return state?.players?.[seatIndex]?.cash ?? 0;
+}
+
+// Net worth for the game-over summary: cash plus each owned property's
+// value (mortgaged properties count at their half-price liquidation
+// value, since that's what they'd actually convert back to in cash).
+interface MonopolyNetWorthState {
+  players?: Record<number, { cash: number; bankrupt: boolean }>;
+  properties?: Record<number, { ownerSeat: number | null; houses: number; mortgaged: boolean }>;
+}
+
+const monopolyNetWorth = computed(() => {
+  if (gameTypeCode.value !== "monopoly" || !roomStore.room) return [];
+  const state = roomStore.boardState as MonopolyNetWorthState | null;
+  if (!state) return [];
+
+  return roomStore.room.players
+    .map((p) => {
+      let worth = state.players?.[p.seatIndex]?.cash ?? 0;
+      for (const space of MONOPOLY_BOARD) {
+        const prop = state.properties?.[space.index];
+        if (!prop || prop.ownerSeat !== p.seatIndex) continue;
+        worth += prop.mortgaged
+          ? Math.floor((space.price ?? 0) / 2)
+          : (space.price ?? 0) + prop.houses * (space.houseCost ?? 0);
+      }
+      return {
+        seatIndex: p.seatIndex,
+        displayName: p.displayName,
+        color: p.color,
+        worth,
+        bankrupt: state.players?.[p.seatIndex]?.bankrupt ?? false,
+      };
+    })
+    .sort((a, b) => b.worth - a.worth);
+});
+
+function monopolyBankrupt(seatIndex: number): boolean {
+  const state = roomStore.boardState as {
+    players?: Record<number, { bankrupt: boolean }>;
+  } | null;
+  return state?.players?.[seatIndex]?.bankrupt ?? false;
+}
+
+function monopolyInJail(seatIndex: number): boolean {
+  const state = roomStore.boardState as {
+    players?: Record<number, { inJail: boolean }>;
+  } | null;
+  return state?.players?.[seatIndex]?.inJail ?? false;
+}
+
+function monopolyJailFreeCards(seatIndex: number): number {
+  const state = roomStore.boardState as {
+    players?: Record<number, { jailFreeCards: number }>;
+  } | null;
+  return state?.players?.[seatIndex]?.jailFreeCards ?? 0;
+}
+
+const MONOPOLY_OWNED_TYPES = new Set(["property", "transit", "utility"]);
+
+function monopolyOwnedProperties(seatIndex: number) {
+  const state = roomStore.boardState as MonopolyNetWorthState | null;
+  if (!state) return [];
+  return MONOPOLY_BOARD.filter(
+    (space) => MONOPOLY_OWNED_TYPES.has(space.type) && state.properties?.[space.index]?.ownerSeat === seatIndex
+  ).map((space) => {
+    const prop = state.properties![space.index];
+    return { space, houses: prop.houses, mortgaged: prop.mortgaged };
+  });
+}
+
+function monopolyNetWorthFor(seatIndex: number): number {
+  return monopolyNetWorth.value.find((p) => p.seatIndex === seatIndex)?.worth ?? monopolyCash(seatIndex);
+}
+
+const expandedMonopolySeat = ref<number | null>(null);
+
+function toggleMonopolyExpand(seatIndex: number) {
+  expandedMonopolySeat.value = expandedMonopolySeat.value === seatIndex ? null : seatIndex;
 }
 
 const myLudoTokens = computed(() => {
@@ -274,6 +449,11 @@ onMounted(() => {
               <strong v-if="isMyTurn" class="turn-badge turn-badge-mine"
                 >Your turn!</strong
               >
+              <strong
+                v-else-if="monopolyMyBidTurn"
+                class="turn-badge turn-badge-bid"
+                >Your bid!</strong
+              >
               <span v-else class="turn-badge">
                 {{
                   roomStore.room.players.find(
@@ -293,12 +473,27 @@ onMounted(() => {
             <template v-if="gameTypeCode !== 'olo'">
               <span class="turn-divider" />
 
+              <!-- Monopoly rolls two d6s; lastDiceValue is their sum
+                   (up to 12), which doesn't fit the single 1-6 pip die,
+                   so it gets two dice from the individually-tracked
+                   values instead. -->
+              <template v-if="gameTypeCode === 'monopoly'">
+                <DiceRoller
+                  :value="roomStore.monopolyDice?.[0] ?? null"
+                  :is-rolling="roomStore.isRolling"
+                />
+                <DiceRoller
+                  :value="roomStore.monopolyDice?.[1] ?? null"
+                  :is-rolling="roomStore.isRolling"
+                />
+              </template>
               <DiceRoller
+                v-else
                 :value="roomStore.lastDiceValue"
                 :is-rolling="roomStore.isRolling"
               />
               <button
-                v-if="isMyTurn && !roomStore.awaitingMoveChoice"
+                v-if="isMyTurn && !roomStore.awaitingMoveChoice && !monopolyBlockingDecision"
                 class="btn btn-primary"
                 :disabled="roomStore.isRolling"
                 @click="handleRollDice"
@@ -344,6 +539,21 @@ onMounted(() => {
         class="card text-center"
       >
         <h2>🎉 {{ winnerName }} wins!</h2>
+
+        <div v-if="monopolyNetWorth.length" class="net-worth-list">
+          <div
+            v-for="p in monopolyNetWorth"
+            :key="p.seatIndex"
+            class="row net-worth-row"
+          >
+            <span class="color-dot token-3d">{{ tokenIconForSeat(p.seatIndex) }}</span>
+            <strong>{{ p.displayName }}</strong>
+            <span class="text-muted"
+              >${{ p.worth }}<template v-if="p.bankrupt"> · bankrupt</template></span
+            >
+          </div>
+        </div>
+
         <button class="btn btn-primary" @click="handleLeaveRoom">
           Back to lobby
         </button>
@@ -359,29 +569,88 @@ onMounted(() => {
         <aside class="game-sidebar">
           <div class="card player-status-panel">
             <h4 class="panel-title">Players</h4>
-            <div
-              v-for="player in roomStore.room.players"
-              :key="player.userId"
-              class="row player-row"
-              :class="{
-                'player-row-active': player.seatIndex === roomStore.currentTurnSeat,
-              }"
-            >
-              <span
-                class="color-dot"
-                :style="{ background: player.color ?? '#4f46e5' }"
-              />
-              <strong>{{ player.displayName }}</strong>
-              <span v-if="gameTypeCode === 'ludo'" class="text-muted">
-                Home: {{ ludoHomeCount(player.seatIndex) }} · Finished:
-                {{ ludoFinishedCount(player.seatIndex) }} / 4
-              </span>
-              <span v-else-if="gameTypeCode === 'snakes_ladders'" class="text-muted">
-                Square {{ snakesLaddersPosition(player.seatIndex) }} / 100
-              </span>
-              <span v-else-if="gameTypeCode === 'olo'" class="text-muted">
-                Score: {{ oloScore(player.seatIndex) }}
-              </span>
+            <div v-for="player in roomStore.room.players" :key="player.userId" class="player-block">
+              <div
+                class="row player-row"
+                :class="{
+                  'player-row-active': player.seatIndex === roomStore.currentTurnSeat,
+                  clickable: gameTypeCode === 'monopoly',
+                }"
+                :role="gameTypeCode === 'monopoly' ? 'button' : undefined"
+                :tabindex="gameTypeCode === 'monopoly' ? 0 : undefined"
+                @click="gameTypeCode === 'monopoly' && toggleMonopolyExpand(player.seatIndex)"
+                @keydown.enter="gameTypeCode === 'monopoly' && toggleMonopolyExpand(player.seatIndex)"
+              >
+                <span
+                  class="color-dot"
+                  :class="{ 'token-3d': gameTypeCode === 'monopoly' }"
+                  :style="gameTypeCode === 'monopoly' ? {} : { background: player.color ?? '#4f46e5' }"
+                  >{{ gameTypeCode === 'monopoly' ? tokenIconForSeat(player.seatIndex) : '' }}</span
+                >
+                <strong>{{ player.displayName }}</strong>
+                <span v-if="gameTypeCode === 'ludo'" class="text-muted">
+                  Home: {{ ludoHomeCount(player.seatIndex) }} · Finished:
+                  {{ ludoFinishedCount(player.seatIndex) }} / 4
+                </span>
+                <span v-else-if="gameTypeCode === 'snakes_ladders'" class="text-muted">
+                  Square {{ snakesLaddersPosition(player.seatIndex) }} / 100
+                </span>
+                <span v-else-if="gameTypeCode === 'olo'" class="text-muted">
+                  Score: {{ oloScore(player.seatIndex) }}
+                </span>
+                <span v-else-if="gameTypeCode === 'monopoly'" class="text-muted">
+                  ${{ monopolyCash(player.seatIndex) }}
+                  <template v-if="monopolyBankrupt(player.seatIndex)">· bankrupt</template>
+                </span>
+                <span v-if="gameTypeCode === 'monopoly'" class="expand-caret">
+                  {{ expandedMonopolySeat === player.seatIndex ? '▲' : '▼' }}
+                </span>
+              </div>
+
+              <div
+                v-if="gameTypeCode === 'monopoly' && expandedMonopolySeat === player.seatIndex"
+                class="player-detail"
+              >
+                <div class="player-detail-stats">
+                  <span>💵 ${{ monopolyCash(player.seatIndex) }}</span>
+                  <span>📊 Net worth: ${{ monopolyNetWorthFor(player.seatIndex) }}</span>
+                  <span>
+                    🪪
+                    {{
+                      monopolyBankrupt(player.seatIndex)
+                        ? "Bankrupt"
+                        : monopolyInJail(player.seatIndex)
+                          ? "In jail"
+                          : "Free"
+                    }}
+                  </span>
+                  <span v-if="monopolyJailFreeCards(player.seatIndex) > 0">
+                    🎟️ {{ monopolyJailFreeCards(player.seatIndex) }}x Get Out of Jail Free
+                  </span>
+                </div>
+
+                <p v-if="!monopolyOwnedProperties(player.seatIndex).length" class="text-muted no-properties">
+                  Owns no properties yet.
+                </p>
+                <ul v-else class="owned-list">
+                  <li
+                    v-for="{ space, houses, mortgaged } in monopolyOwnedProperties(player.seatIndex)"
+                    :key="space.index"
+                    class="owned-item"
+                  >
+                    <span
+                      v-if="space.group"
+                      class="owned-swatch"
+                      :style="{ background: MONOPOLY_GROUP_COLORS[space.group] }"
+                    />
+                    <span class="owned-name">{{ space.name }}</span>
+                    <span v-if="houses > 0" class="owned-houses">
+                      {{ houses >= MONOPOLY_HOTEL_LEVEL ? '🏨' : '🏠'.repeat(houses) }}
+                    </span>
+                    <span v-if="mortgaged" class="owned-mortgaged">Mortgaged</span>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
 
@@ -430,6 +699,26 @@ onMounted(() => {
             @live-positions="handleOloLivePositions"
             @shot-result="handleOloShotResult"
           />
+          <MonopolyBoard
+            v-else-if="gameTypeCode === 'monopoly'"
+            :board-state="roomStore.boardState as any"
+            :players="roomStore.room.players"
+            :current-turn-seat="roomStore.currentTurnSeat"
+            :my-seat-index="myPlayer?.seatIndex ?? null"
+            hide-player-summary
+            @buy-decision="handleMonopolyBuyDecision"
+            @build-house="handleMonopolyBuildHouse"
+            @pay-jail-fine="handleMonopolyPayJailFine"
+            @place-bid="handleMonopolyPlaceBid"
+            @pass-auction="handleMonopolyPassAuction"
+            @propose-trade="handleMonopolyProposeTrade"
+            @respond-trade="handleMonopolyRespondTrade"
+            @sell-house="handleMonopolySellHouse"
+            @mortgage="handleMonopolyMortgage"
+            @unmortgage="handleMonopolyUnmortgage"
+            @pay-debt="handleMonopolyPayDebt"
+            @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
+          />
         </div>
       </div>
 
@@ -465,6 +754,25 @@ onMounted(() => {
           :live-opponent-positions="roomStore.oloLiveOpponentPositions"
           @live-positions="handleOloLivePositions"
           @shot-result="handleOloShotResult"
+        />
+        <MonopolyBoard
+          v-else-if="gameTypeCode === 'monopoly'"
+          :board-state="roomStore.boardState as any"
+          :players="roomStore.room.players"
+          :current-turn-seat="roomStore.currentTurnSeat"
+          :my-seat-index="myPlayer?.seatIndex ?? null"
+          @buy-decision="handleMonopolyBuyDecision"
+          @build-house="handleMonopolyBuildHouse"
+          @pay-jail-fine="handleMonopolyPayJailFine"
+          @place-bid="handleMonopolyPlaceBid"
+          @pass-auction="handleMonopolyPassAuction"
+          @propose-trade="handleMonopolyProposeTrade"
+          @respond-trade="handleMonopolyRespondTrade"
+          @sell-house="handleMonopolySellHouse"
+          @mortgage="handleMonopolyMortgage"
+          @unmortgage="handleMonopolyUnmortgage"
+          @pay-debt="handleMonopolyPayDebt"
+          @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
         />
 
         <div v-if="roomStore.eventLog.length" class="event-log card">
@@ -637,10 +945,27 @@ onMounted(() => {
 }
 
 .color-dot {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Monopoly only (see gameTypeCode checks above) -- a glossy raised-piece
+   look instead of a flat color dot, matching MonopolyBoard's own tokens. */
+.token-3d {
+  font-size: 14px;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
+}
+
+.player-block {
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .player-row {
@@ -649,8 +974,88 @@ onMounted(() => {
   transition: background 0.2s ease;
 }
 
+.player-row.clickable {
+  cursor: pointer;
+}
+
 .player-row-active {
   background: rgba(147, 51, 234, 0.18);
+}
+
+.expand-caret {
+  margin-left: auto;
+  font-size: 0.6rem;
+  color: var(--color-text-muted);
+}
+
+.player-detail {
+  padding: 0.4rem 0.5rem 0.6rem 1.9rem;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.player-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.no-properties {
+  margin: 0;
+}
+
+.owned-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.owned-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.owned-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.owned-name {
+  flex: 1;
+}
+
+.owned-houses {
+  font-size: 0.7rem;
+}
+
+.owned-mortgaged {
+  font-size: 0.65rem;
+  color: #f87171;
+  border: 1px solid #f87171;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.net-worth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 320px;
+  margin: 1rem auto 1.5rem;
+}
+
+.net-worth-row {
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .event-log {
@@ -705,6 +1110,25 @@ onMounted(() => {
 .turn-badge-mine {
   color: var(--color-primary);
   font-size: 1.1rem;
+}
+
+/* Distinct from turn-badge-mine on purpose: this means "the main turn is
+   someone else's, but an auction needs your bid right now" -- a visually
+   different cue (amber + pulse) so it doesn't read as your regular turn. */
+.turn-badge-bid {
+  color: #f0b429;
+  font-size: 1.1rem;
+  animation: bid-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes bid-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .turn-timer {

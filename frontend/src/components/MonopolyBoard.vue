@@ -407,7 +407,6 @@ function isCorner(index: number): boolean {
             v-for="p in playersOn(space.index)"
             :key="p.userId"
             class="ms-token"
-            :style="{ '--token-color': p.color ?? '#999' }"
             :title="p.displayName"
           >{{ tokenIconForSeat(p.seatIndex) }}</span>
         </div>
@@ -421,7 +420,7 @@ function isCorner(index: number): boolean {
             class="ms-player-row"
             :class="{ 'ms-player-active': p.seatIndex === currentTurnSeat }"
           >
-            <span class="color-dot" :style="{ '--token-color': p.color ?? '#4f46e5' }">{{ tokenIconForSeat(p.seatIndex) }}</span>
+            <span class="color-dot">{{ tokenIconForSeat(p.seatIndex) }}</span>
             <strong>{{ p.displayName }}</strong>
             <span class="text-muted">${{ cashFor(p.seatIndex) }}</span>
             <span v-if="bankruptFor(p.seatIndex)" class="text-muted">💸</span>
@@ -801,31 +800,17 @@ function isCorner(index: number): boolean {
   justify-content: center;
 }
 
-/* Glossy, raised playing-piece look: a radial gradient fakes a lit
-   sphere (bright highlight top-left, darker rim at the edge), an inset
-   shadow along the bottom carves in roundness, and a drop shadow lifts
-   the piece off the board surface instead of it reading as a flat dot. */
+/* Just the piece itself now (no color-circle backdrop) -- a drop
+   shadow keeps it legible against whatever's under it on the board. */
 .ms-token {
-  --token-color: #999;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle at 32% 28%,
-    color-mix(in srgb, var(--token-color) 45%, white) 0%,
-    var(--token-color) 55%,
-    color-mix(in srgb, var(--token-color) 65%, black) 100%
-  );
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.5),
-    inset 0 1px 1px rgba(255, 255, 255, 0.7),
-    inset 0 -2px 2px rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: 13px;
   line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
 }
 
 .ms-center {
@@ -859,26 +844,15 @@ function isCorner(index: number): boolean {
 }
 
 .color-dot {
-  --token-color: #4f46e5;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle at 32% 28%,
-    color-mix(in srgb, var(--token-color) 45%, white) 0%,
-    var(--token-color) 55%,
-    color-mix(in srgb, var(--token-color) 65%, black) 100%
-  );
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.5),
-    inset 0 1px 1px rgba(255, 255, 255, 0.7),
-    inset 0 -2px 2px rgba(0, 0, 0, 0.4);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 15px;
   line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
 }
 
 .ms-action {

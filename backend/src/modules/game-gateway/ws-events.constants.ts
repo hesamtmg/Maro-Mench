@@ -42,6 +42,7 @@ export const WS_EVENTS_IN = {
   CONQUEST_RESET_REINFORCEMENTS: 'conquest_reset_reinforcements', // { roomId } -- undo this turn's reinforce-phase placements
   CONQUEST_MOVE_ARMIES: 'conquest_move_armies', // { roomId, fromId, toId, count } -- free repositioning during reinforce or fortify, no adjacency required
   CONQUEST_ATTACK: 'conquest_attack', // { roomId, fromId, toId, diceCount }
+  CONQUEST_OCCUPY_CAPTURED: 'conquest_occupy_captured', // { roomId, additionalCount } -- move more armies into the territory just captured
   CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase', // { roomId }
   CONQUEST_END_TURN: 'conquest_end_turn', // { roomId }
   CONQUEST_TRADE_CARDS: 'conquest_trade_cards', // { roomId, cardIds: string[] }

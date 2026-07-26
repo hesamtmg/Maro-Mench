@@ -1204,6 +1204,43 @@ export class GameGateway
     }
   }
 
+  /**
+   * Conquest-only: moves additional armies into the territory just
+   * captured, on top of the automatic minimum -- the classic Risk
+   * "how many armies to occupy with" choice. Doesn't consume the turn.
+   */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_OCCUPY_CAPTURED)
+  async onConquestOccupyCaptured(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; additionalCount: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.conquestEngine.occupyCapturedTerritory(
+        gameState.boardState,
+        player.seatIndex,
+        payload.additionalCount,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        occupiedMore: payload.additionalCount,
+      });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   /** Conquest-only: voluntarily ends the attack phase (no more attacks this turn) and moves to fortify. */
   @SubscribeMessage(WS_EVENTS_IN.CONQUEST_END_ATTACK_PHASE)
   async onConquestEndAttackPhase(

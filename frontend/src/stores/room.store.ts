@@ -229,6 +229,7 @@ interface ConquestStateUpdatedEvent {
   territoryBonusId?: string | null;
   movedArmies?: { from: string; to: string; count: number };
   reinforcementsReset?: boolean;
+  occupiedMore?: number;
 }
 
 interface ConquestAttackResultEvent {
@@ -255,6 +256,7 @@ function conquestStateEventMessage(
     return `🚚 ${name} moved ${count} army/armies from ${from} to ${to}.`;
   }
   if (payload.movedToFortify) return `⏭️ ${name} moved to the fortify phase.`;
+  if (payload.occupiedMore) return `⚔️ ${name} moved ${payload.occupiedMore} more army/armies into the captured territory.`;
   return null;
 }
 
@@ -817,6 +819,10 @@ export const useRoomStore = defineStore('room', {
 
     conquestAttack(roomId: string, fromId: string, toId: string, diceCount: number) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_ATTACK, { roomId, fromId, toId, diceCount });
+    },
+
+    conquestOccupyCaptured(roomId: string, additionalCount: number) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_OCCUPY_CAPTURED, { roomId, additionalCount });
     },
 
     conquestEndAttackPhase(roomId: string) {

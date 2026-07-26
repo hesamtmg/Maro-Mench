@@ -173,6 +173,7 @@ const EDGES: Array<[string, string]> = [
   ['cragmoor', 'goldshore'], // the Bosphorus
   ['emberwaste', 'goldshore'], // Suez
   ['highmarch', 'reefhaven'], // Indonesia - New Guinea
+  ['duneshore', 'canopy_reach'], // Africa - South America (narrowest Atlantic crossing)
 ];
 
 export const TERRITORY_BY_ID: Record<string, TerritoryDef> = Object.fromEntries(

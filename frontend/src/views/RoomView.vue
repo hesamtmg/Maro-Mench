@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { roomsApi } from "../api/rooms.api";
 import ConquestBoard from "../components/ConquestBoard.vue";
+import { CONTINENTS, TERRITORIES } from "../components/conquest/board-config";
 import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
@@ -350,6 +351,24 @@ function conquestEliminated(seatIndex: number): boolean {
   return state?.players?.[seatIndex]?.eliminated ?? false;
 }
 
+function conquestContinentsOwned(seatIndex: number): { id: string; name: string }[] {
+  const state = roomStore.boardState as { owner?: Record<string, number> } | null;
+  if (!state?.owner) return [];
+  const owner = state.owner;
+  return CONTINENTS.filter((c) =>
+    TERRITORIES.filter((t) => t.continentId === c.id).every((t) => owner[t.id] === seatIndex)
+  );
+}
+
+function conquestTerritoriesOwned(seatIndex: number): { id: string; name: string }[] {
+  const state = roomStore.boardState as { owner?: Record<string, number> } | null;
+  if (!state?.owner) return [];
+  const owner = state.owner;
+  return TERRITORIES.filter((t) => owner[t.id] === seatIndex).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+}
+
 function handleConquestReinforce(territoryId: string, count: number) {
   roomStore.conquestReinforce(props.id, territoryId, count);
 }
@@ -364,6 +383,10 @@ function handleConquestMoveArmies(fromId: string, toId: string, count: number) {
 
 function handleConquestAttack(fromId: string, toId: string, diceCount: number) {
   roomStore.conquestAttack(props.id, fromId, toId, diceCount);
+}
+
+function handleConquestOccupyCaptured(additionalCount: number) {
+  roomStore.conquestOccupyCaptured(props.id, additionalCount);
 }
 
 function handleConquestEndAttackPhase() {
@@ -417,6 +440,12 @@ const expandedMonopolySeat = ref<number | null>(null);
 
 function toggleMonopolyExpand(seatIndex: number) {
   expandedMonopolySeat.value = expandedMonopolySeat.value === seatIndex ? null : seatIndex;
+}
+
+const expandedConquestSeat = ref<number | null>(null);
+
+function toggleConquestExpand(seatIndex: number) {
+  expandedConquestSeat.value = expandedConquestSeat.value === seatIndex ? null : seatIndex;
 }
 
 const myLudoTokens = computed(() => {
@@ -648,12 +677,20 @@ onMounted(() => {
                 class="row player-row"
                 :class="{
                   'player-row-active': player.seatIndex === roomStore.currentTurnSeat,
-                  clickable: gameTypeCode === 'monopoly',
+                  clickable: gameTypeCode === 'monopoly' || gameTypeCode === 'conquest',
                 }"
-                :role="gameTypeCode === 'monopoly' ? 'button' : undefined"
-                :tabindex="gameTypeCode === 'monopoly' ? 0 : undefined"
-                @click="gameTypeCode === 'monopoly' && toggleMonopolyExpand(player.seatIndex)"
-                @keydown.enter="gameTypeCode === 'monopoly' && toggleMonopolyExpand(player.seatIndex)"
+                :role="gameTypeCode === 'monopoly' || gameTypeCode === 'conquest' ? 'button' : undefined"
+                :tabindex="gameTypeCode === 'monopoly' || gameTypeCode === 'conquest' ? 0 : undefined"
+                @click="
+                  gameTypeCode === 'monopoly'
+                    ? toggleMonopolyExpand(player.seatIndex)
+                    : gameTypeCode === 'conquest' && toggleConquestExpand(player.seatIndex)
+                "
+                @keydown.enter="
+                  gameTypeCode === 'monopoly'
+                    ? toggleMonopolyExpand(player.seatIndex)
+                    : gameTypeCode === 'conquest' && toggleConquestExpand(player.seatIndex)
+                "
               >
                 <span
                   class="color-dot"
@@ -687,6 +724,9 @@ onMounted(() => {
                 </span>
                 <span v-if="gameTypeCode === 'monopoly'" class="expand-caret">
                   {{ expandedMonopolySeat === player.seatIndex ? '▲' : '▼' }}
+                </span>
+                <span v-else-if="gameTypeCode === 'conquest'" class="expand-caret">
+                  {{ expandedConquestSeat === player.seatIndex ? '▲' : '▼' }}
                 </span>
               </div>
 
@@ -733,6 +773,21 @@ onMounted(() => {
                     <span v-if="mortgaged" class="owned-mortgaged">Mortgaged</span>
                   </li>
                 </ul>
+              </div>
+
+              <div
+                v-if="gameTypeCode === 'conquest' && expandedConquestSeat === player.seatIndex"
+                class="player-detail"
+              >
+                <p v-if="conquestContinentsOwned(player.seatIndex).length > 0" class="player-detail-stats">
+                  🌎 {{ conquestContinentsOwned(player.seatIndex).map((c) => c.name).join(", ") }}
+                </p>
+                <p v-if="!conquestTerritoriesOwned(player.seatIndex).length" class="text-muted no-properties">
+                  Owns no territories yet.
+                </p>
+                <p v-else class="text-muted">
+                  {{ conquestTerritoriesOwned(player.seatIndex).map((t) => t.name).join(", ") }}
+                </p>
               </div>
             </div>
           </div>
@@ -815,6 +870,7 @@ onMounted(() => {
             @reset-reinforcements="handleConquestResetReinforcements"
             @move-armies="handleConquestMoveArmies"
             @attack="handleConquestAttack"
+            @occupy-captured="handleConquestOccupyCaptured"
             @end-attack-phase="handleConquestEndAttackPhase"
             @end-turn="handleConquestEndTurn"
             @trade-cards="handleConquestTradeCards"
@@ -897,6 +953,7 @@ onMounted(() => {
           @reset-reinforcements="handleConquestResetReinforcements"
           @move-armies="handleConquestMoveArmies"
           @attack="handleConquestAttack"
+          @occupy-captured="handleConquestOccupyCaptured"
           @end-attack-phase="handleConquestEndAttackPhase"
           @end-turn="handleConquestEndTurn"
           @trade-cards="handleConquestTradeCards"

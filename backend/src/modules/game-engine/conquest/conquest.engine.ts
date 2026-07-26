@@ -40,6 +40,14 @@ export interface ConquestState {
   // bonuses) -- lets a misclick be undone via resetReinforcements. Cleared
   // at the start of every reinforce phase.
   reinforcementsPlacedThisTurn: Record<string, number>;
+  // Set to the from/to pair of the territory just captured by the most
+  // recent attack roll, so the attacker can optionally move in more than
+  // the automatic minimum before attacking again -- classic Risk's
+  // "how many armies to occupy with" choice. Cleared by any further
+  // attack roll (successful or not) or by leaving the attack phase, since
+  // the choice is only available in the moment right after that capture.
+  lastCaptureFromId: string | null;
+  lastCaptureToId: string | null;
 }
 
 // Bonus reinforcement armies for the Nth set traded in (0-indexed),
@@ -108,6 +116,8 @@ function cloneState(state: ConquestState): ConquestState {
     cardsTradedInCount: state.cardsTradedInCount,
     capturedTerritoryThisTurn: state.capturedTerritoryThisTurn,
     reinforcementsPlacedThisTurn: { ...state.reinforcementsPlacedThisTurn },
+    lastCaptureFromId: state.lastCaptureFromId,
+    lastCaptureToId: state.lastCaptureToId,
   };
 }
 
@@ -219,6 +229,8 @@ export class ConquestEngine implements GameEngine {
       cardsTradedInCount: 0,
       capturedTerritoryThisTurn: false,
       reinforcementsPlacedThisTurn: {},
+      lastCaptureFromId: null,
+      lastCaptureToId: null,
     };
     state.reinforcementsRemaining = reinforcementsFor(state, state.currentTurnSeat);
 
@@ -383,17 +395,25 @@ export class ConquestEngine implements GameEngine {
 
     let captured = false;
     let eliminatedSeat: number | null = null;
+    // Any attack roll -- win, loss, or draw -- closes the previous
+    // capture's occupation-choice window; it's only open in the moment
+    // right after that specific capture.
+    state.lastCaptureFromId = null;
+    state.lastCaptureToId = null;
 
     if (state.armies[toId] <= 0) {
       captured = true;
       state.owner[toId] = seatIndex;
       state.capturedTerritoryThisTurn = true;
       // Classic minimum: move in exactly as many armies as attacking dice
-      // rolled -- a v1 simplification (no separate "how many to move in"
-      // prompt). Always leaves at least 1 army behind in the source.
+      // rolled. The player can move in more via occupyCapturedTerritory,
+      // up to leaving 1 behind in the source, as long as they do it before
+      // their next attack roll.
       const moveIn = Math.min(attackerDiceCount, state.armies[fromId] - 1);
       state.armies[fromId] -= moveIn;
       state.armies[toId] = moveIn;
+      state.lastCaptureFromId = fromId;
+      state.lastCaptureToId = toId;
 
       if (territoryCount(state, defenderSeat) === 0) {
         state.players[defenderSeat].eliminated = true;
@@ -432,6 +452,38 @@ export class ConquestEngine implements GameEngine {
     };
   }
 
+  /**
+   * Moves additional armies from the attacking territory into the one just
+   * captured, on top of the automatic minimum already moved in -- classic
+   * Risk's "how many armies to occupy with" choice. Only valid right after
+   * that specific capture (closed by the next attack roll or leaving the
+   * attack phase); always leaves at least 1 army behind in the source.
+   */
+  occupyCapturedTerritory(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    additionalCount: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as ConquestState);
+    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
+    if (state.phase !== 'attack') throw new Error('Not in the attack phase.');
+    if (!state.lastCaptureFromId || !state.lastCaptureToId) {
+      throw new Error('No territory was just captured to occupy.');
+    }
+    if (state.owner[state.lastCaptureFromId] !== seatIndex) {
+      throw new Error('You do not own that territory.');
+    }
+    if (additionalCount < 1) throw new Error('Must move at least one army.');
+    if (additionalCount > state.armies[state.lastCaptureFromId] - 1) {
+      throw new Error('You must leave at least one army behind.');
+    }
+
+    state.armies[state.lastCaptureFromId] -= additionalCount;
+    state.armies[state.lastCaptureToId] += additionalCount;
+
+    return state as unknown as Record<string, unknown>;
+  }
+
   /** Voluntarily ends the attack phase (no more attacks this turn) and moves to fortify. */
   endAttackPhase(
     boardStateIn: Record<string, unknown>,
@@ -441,6 +493,8 @@ export class ConquestEngine implements GameEngine {
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
     if (state.phase !== 'attack') throw new Error('Not in the attack phase.');
     state.phase = 'fortify';
+    state.lastCaptureFromId = null;
+    state.lastCaptureToId = null;
     return state as unknown as Record<string, unknown>;
   }
 
@@ -560,6 +614,8 @@ export class ConquestEngine implements GameEngine {
     state.phase = 'reinforce';
     state.reinforcementsRemaining = reinforcementsFor(state, next);
     state.reinforcementsPlacedThisTurn = {};
+    state.lastCaptureFromId = null;
+    state.lastCaptureToId = null;
     return {
       boardState: state as unknown as Record<string, unknown>,
       nextTurnSeat: next,

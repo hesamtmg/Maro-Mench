@@ -30,6 +30,7 @@ const emit = defineEmits<{
   "reset-reinforcements": [];
   "move-armies": [fromId: string, toId: string, count: number];
   attack: [fromId: string, toId: string, diceCount: number];
+  "occupy-captured": [additionalCount: number];
   "end-attack-phase": [];
   "end-turn": [];
   "trade-cards": [cardIds: string[]];
@@ -51,6 +52,8 @@ interface ConquestStateShape {
   reinforcementsPlacedThisTurn: Record<string, number>;
   hands: Record<number, CardDef[]>;
   cardsTradedInCount: number;
+  lastCaptureFromId: string | null;
+  lastCaptureToId: string | null;
 }
 
 // Client-side mirror of the backend's escalating trade-in bonus schedule
@@ -155,10 +158,13 @@ function zoomOutButton() {
   zoomTo(zoom.value / 1.5);
 }
 
-function resetZoom() {
-  zoom.value = MIN_ZOOM;
-  viewX.value = 0;
-  viewY.value = 0;
+// Double-click zooms in centered on the click point (standard map
+// convention). Deliberately not double-tap on touch -- that's better left
+// for a future pinch-follow-up, and a stray double-tap while trying to
+// select two territories quickly shouldn't suddenly zoom the map.
+function onMapDoubleClick(evt: MouseEvent) {
+  const anchor = svgPointFromClient(evt.clientX, evt.clientY);
+  zoomTo(zoom.value * 1.75, anchor ?? undefined);
 }
 
 const isPanning = ref(false);
@@ -332,6 +338,25 @@ function continentsOwnedBy(seatIndex: number | null) {
   );
 }
 
+function territoriesOwnedBy(seatIndex: number | null) {
+  const s = state.value;
+  if (!s || seatIndex == null) return [];
+  return TERRITORIES.filter((t) => s.owner[t.id] === seatIndex).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+}
+
+// Which players' full territory list is expanded in the sidebar card --
+// keyed by seatIndex, collapsed by default since a player can own up to
+// all 42 territories.
+const expandedTerritoriesFor = ref<Set<number>>(new Set());
+function toggleTerritoriesExpanded(seatIndex: number) {
+  const next = new Set(expandedTerritoriesFor.value);
+  if (next.has(seatIndex)) next.delete(seatIndex);
+  else next.add(seatIndex);
+  expandedTerritoriesFor.value = next;
+}
+
 const myContinentBonus = computed(() => {
   const owned = continentsOwnedBy(props.mySeatIndex);
   return {
@@ -465,8 +490,23 @@ const nodeById = computed(() =>
   Object.fromEntries(nodePositions.value.map((n) => [n.id, n]))
 );
 
+// Bering Strait (icemark <-> sunset_bay) sits on opposite sides of this
+// flat map, so drawn as one straight line it cuts a long diagonal clean
+// across the whole board. Drawn instead as two short stubs pointing off
+// their nearest edge, implying the connection wraps around behind the
+// map -- same convention most Risk-style flat maps use for Alaska-
+// Kamchatka -- rather than as a single line over everything in between.
+const WRAP_EDGE_IDS: [string, string] = ["icemark", "sunset_bay"];
+const WRAP_STUB_LENGTH = 22;
+
 const edgeLines = computed(() =>
-  EDGE_LIST.map(([a, b]) => ({
+  EDGE_LIST.filter(
+    ([a, b]) =>
+      !(
+        (a === WRAP_EDGE_IDS[0] && b === WRAP_EDGE_IDS[1]) ||
+        (a === WRAP_EDGE_IDS[1] && b === WRAP_EDGE_IDS[0])
+      )
+  ).map(([a, b]) => ({
     a,
     b,
     x1: nodeById.value[a].cx,
@@ -475,6 +515,17 @@ const edgeLines = computed(() =>
     y2: nodeById.value[b].cy,
   }))
 );
+
+const wrapEdgeStubs = computed(() => {
+  const [aId, bId] = WRAP_EDGE_IDS;
+  const a = nodeById.value[aId];
+  const b = nodeById.value[bId];
+  if (!a || !b) return [];
+  return [
+    { key: `${aId}-wrap`, x1: a.cx, y1: a.cy, x2: Math.max(0, a.cx - WRAP_STUB_LENGTH), y2: a.cy },
+    { key: `${bId}-wrap`, x1: b.cx, y1: b.cy, x2: Math.min(VIEW_W, b.cx + WRAP_STUB_LENGTH), y2: b.cy },
+  ];
+});
 
 // One bonus badge per continent, floated just above that continent's
 // northernmost territory (average x across its territories, so it centers
@@ -554,6 +605,36 @@ function continueAttacking() {
   if (!lc || !canContinueAttack.value) return;
   const dice = Math.max(1, Math.min(3, armiesOn(lc.fromId) - 1));
   emit("attack", lc.fromId, lc.toId, dice);
+}
+
+// --- Occupying a just-captured territory with more than the minimum ---
+// Classic Risk choice: right after a capture, move in more armies than
+// the automatic minimum (attacker dice count), as long as at least one
+// stays behind. Only available until the next attack roll or leaving the
+// attack phase (see ConquestState.lastCaptureFromId/ToId on the backend).
+const occupyCount = ref(1);
+const pendingOccupation = computed(() => {
+  const s = state.value;
+  if (!s || !isMyTurn.value || s.phase !== "attack") return null;
+  if (!s.lastCaptureFromId || !s.lastCaptureToId) return null;
+  if (ownerOf(s.lastCaptureFromId) !== props.mySeatIndex) return null;
+  return { fromId: s.lastCaptureFromId, toId: s.lastCaptureToId };
+});
+const maxOccupyCount = computed(() => {
+  const p = pendingOccupation.value;
+  if (!p) return 1;
+  return Math.max(1, armiesOn(p.fromId) - 1);
+});
+watch(maxOccupyCount, (max) => {
+  if (occupyCount.value > max) occupyCount.value = max;
+});
+watch(pendingOccupation, (p) => {
+  if (p) occupyCount.value = 1;
+});
+
+function submitOccupyCaptured() {
+  if (!pendingOccupation.value) return;
+  emit("occupy-captured", occupyCount.value);
 }
 
 // --- Free army movement (reinforce and fortify phases) ---
@@ -710,6 +791,7 @@ function nodeClasses(territoryId: string) {
         @pointermove="onMapPointerMove"
         @pointerup="onMapPointerUp"
         @pointercancel="onMapPointerUp"
+        @dblclick="onMapDoubleClick"
       >
         <!-- Per-continent highlight/shadow gradient + a shared drop-shadow
              filter give the flat landmass fills a subtly raised, globe-lit
@@ -768,6 +850,19 @@ function nodeClasses(territoryId: string) {
           :y2="edge.y2"
           class="cb-edge"
           :class="{ 'cb-edge-strait': nodeById[edge.a].continentId !== nodeById[edge.b].continentId }"
+        />
+
+        <!-- Bering Strait: two short stubs pointing off the map edge
+             instead of one long line across the board -- see
+             wrapEdgeStubs above. -->
+        <line
+          v-for="stub in wrapEdgeStubs"
+          :key="stub.key"
+          :x1="stub.x1"
+          :y1="stub.y1"
+          :x2="stub.x2"
+          :y2="stub.y2"
+          class="cb-edge cb-edge-strait cb-edge-wrap-stub"
         />
 
         <!-- Territory markers styled as little standing toy-soldier
@@ -834,19 +929,11 @@ function nodeClasses(territoryId: string) {
         </g>
       </svg>
 
+      <div class="cb-watermark">🌍 Conquest</div>
+
       <div class="cb-zoom-controls">
         <button type="button" class="cb-zoom-btn" aria-label="Zoom in" title="Zoom in" @click="zoomInButton">+</button>
         <button type="button" class="cb-zoom-btn" aria-label="Zoom out" title="Zoom out" @click="zoomOutButton">&minus;</button>
-        <button
-          v-if="zoom > MIN_ZOOM"
-          type="button"
-          class="cb-zoom-btn cb-zoom-reset"
-          aria-label="Reset zoom"
-          title="Reset zoom"
-          @click="resetZoom"
-        >
-          ⤢
-        </button>
       </div>
 
       <div v-if="state" class="cb-trophies-float">
@@ -933,10 +1020,26 @@ function nodeClasses(territoryId: string) {
           <div class="cb-player-info">
             <strong>{{ p.displayName }}</strong>
             <span v-if="isEliminated(p.seatIndex)" class="text-muted">💀 eliminated</span>
-            <div v-else class="cb-player-stats">
-              <span class="cb-stat">🚩 {{ territoryCountFor(p.seatIndex) }}</span>
-              <span class="cb-stat">⚔️ {{ totalArmiesFor(p.seatIndex) }}</span>
-            </div>
+            <template v-else>
+              <div class="cb-player-stats">
+                <span class="cb-stat">🚩 {{ territoryCountFor(p.seatIndex) }}</span>
+                <span class="cb-stat">⚔️ {{ totalArmiesFor(p.seatIndex) }}</span>
+              </div>
+              <p v-if="continentsOwnedBy(p.seatIndex).length > 0" class="cb-player-continents">
+                🌎 {{ continentsOwnedBy(p.seatIndex).map((c) => c.name).join(", ") }}
+              </p>
+              <button
+                type="button"
+                class="cb-player-territories-toggle"
+                @click="toggleTerritoriesExpanded(p.seatIndex)"
+              >
+                {{ expandedTerritoriesFor.has(p.seatIndex) ? "Hide" : "Show" }} territories
+                {{ expandedTerritoriesFor.has(p.seatIndex) ? "▾" : "▸" }}
+              </button>
+              <p v-if="expandedTerritoriesFor.has(p.seatIndex)" class="cb-player-territories-list">
+                {{ territoriesOwnedBy(p.seatIndex).map((t) => t.name).join(", ") }}
+              </p>
+            </template>
           </div>
         </div>
       </div>
@@ -1118,6 +1221,25 @@ function nodeClasses(territoryId: string) {
             Attacker lost {{ lastCombat.attackerLosses }}, defender lost {{ lastCombat.defenderLosses }}.
             <template v-if="lastCombat.captured">Territory captured!</template>
           </p>
+
+          <div v-if="pendingOccupation" class="cb-occupy-more">
+            <p>
+              <strong>Occupy {{ TERRITORY_BY_ID[pendingOccupation.toId]?.name }}:</strong>
+              move more armies in from {{ TERRITORY_BY_ID[pendingOccupation.fromId]?.name }}
+              ({{ armiesOn(pendingOccupation.fromId) }} there now).
+            </p>
+            <div class="row">
+              <input
+                v-model.number="occupyCount"
+                type="number"
+                min="1"
+                :max="maxOccupyCount"
+                class="cb-move-count"
+              />
+              <button class="btn btn-primary" @click="submitOccupyCaptured">Move in</button>
+            </div>
+          </div>
+
           <button
             v-if="canContinueAttack"
             class="btn btn-primary cb-continue-attack-btn"
@@ -1245,8 +1367,17 @@ function nodeClasses(territoryId: string) {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
-.cb-zoom-reset {
-  font-size: 0.9rem;
+.cb-watermark {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 2.9rem;
+  font-weight: 800;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.32);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  user-select: none;
 }
 
 .cb-trophies-float {
@@ -1319,6 +1450,10 @@ function nodeClasses(territoryId: string) {
 .cb-edge-strait {
   stroke: rgba(255, 255, 255, 0.55);
   stroke-width: 2;
+}
+
+.cb-edge-wrap-stub {
+  opacity: 0.7;
 }
 
 .cb-node {
@@ -1605,6 +1740,35 @@ function nodeClasses(territoryId: string) {
   white-space: nowrap;
 }
 
+.cb-player-continents {
+  margin: 0.25rem 0 0;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.cb-player-territories-toggle {
+  margin-top: 0.25rem;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cb-player-territories-toggle:hover {
+  color: var(--color-text);
+}
+
+.cb-player-territories-list {
+  margin: 0.25rem 0 0;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
 .cb-action {
   font-size: 0.85rem;
 }
@@ -1626,6 +1790,16 @@ function nodeClasses(territoryId: string) {
 .cb-continue-attack-btn {
   width: 100%;
   margin-top: 0.5rem;
+}
+
+.cb-occupy-more {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cb-occupy-more .row {
+  gap: 0.5rem;
 }
 
 .cb-reset-btn {

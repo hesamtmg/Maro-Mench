@@ -56,6 +56,8 @@ function baseState(
     cardsTradedInCount: 0,
     capturedTerritoryThisTurn: false,
     reinforcementsPlacedThisTurn: {},
+    lastCaptureFromId: null,
+    lastCaptureToId: null,
     ...stateOverrides,
   };
 }
@@ -439,6 +441,90 @@ describe('ConquestEngine', () => {
       );
       expect(() => engine.attack(asRecord(s), 0, 'whitepeak', 'pearl_isle', 1)).toThrow(
         'Not in the attack phase.',
+      );
+    });
+
+    it('records the from/to pair on capture, for occupyCapturedTerritory', () => {
+      const s = baseState({ sunset_bay: 1 }, { icemark: 5, sunset_bay: 1 });
+      mockRolls(6, 5, 3, 2);
+      const { boardState } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 3);
+      const result = boardState as unknown as ConquestState;
+      expect(result.lastCaptureFromId).toBe('icemark');
+      expect(result.lastCaptureToId).toBe('sunset_bay');
+    });
+
+    it('does not record a capture pair when the attack fails to capture', () => {
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 2 });
+      mockRolls(4, 4);
+      const { boardState } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
+      const result = boardState as unknown as ConquestState;
+      expect(result.lastCaptureFromId).toBeNull();
+      expect(result.lastCaptureToId).toBeNull();
+    });
+
+    it('clears a previous capture pair on the next attack roll', () => {
+      const s = baseState(
+        { sunset_bay: 0, whitepeak: 1 },
+        { icemark: 5, sunset_bay: 3, coldharbor: 3, whitepeak: 1 },
+        { lastCaptureFromId: 'icemark', lastCaptureToId: 'sunset_bay' },
+      );
+      mockRolls(4, 4);
+      const { boardState } = engine.attack(asRecord(s), 0, 'coldharbor', 'whitepeak', 1);
+      const result = boardState as unknown as ConquestState;
+      expect(result.lastCaptureFromId).toBeNull();
+      expect(result.lastCaptureToId).toBeNull();
+    });
+  });
+
+  describe('occupyCapturedTerritory', () => {
+    it('moves additional armies from the captured-from territory into the captured one', () => {
+      const s = baseState(
+        {},
+        { icemark: 5, sunset_bay: 2 },
+        { lastCaptureFromId: 'icemark', lastCaptureToId: 'sunset_bay' },
+      );
+      const result = engine.occupyCapturedTerritory(asRecord(s), 0, 3) as unknown as ConquestState;
+      expect(result.armies.icemark).toBe(2);
+      expect(result.armies.sunset_bay).toBe(5);
+    });
+
+    it('rejects leaving the source territory empty', () => {
+      const s = baseState(
+        {},
+        { icemark: 3, sunset_bay: 2 },
+        { lastCaptureFromId: 'icemark', lastCaptureToId: 'sunset_bay' },
+      );
+      expect(() => engine.occupyCapturedTerritory(asRecord(s), 0, 3)).toThrow(
+        'You must leave at least one army behind.',
+      );
+    });
+
+    it('rejects when nothing was just captured', () => {
+      const s = baseState({}, { icemark: 5 });
+      expect(() => engine.occupyCapturedTerritory(asRecord(s), 0, 1)).toThrow(
+        'No territory was just captured to occupy.',
+      );
+    });
+
+    it('rejects outside the attack phase', () => {
+      const s = baseState(
+        {},
+        { icemark: 5, sunset_bay: 2 },
+        { phase: 'fortify', lastCaptureFromId: 'icemark', lastCaptureToId: 'sunset_bay' },
+      );
+      expect(() => engine.occupyCapturedTerritory(asRecord(s), 0, 1)).toThrow(
+        'Not in the attack phase.',
+      );
+    });
+
+    it("rejects acting when it isn't your turn", () => {
+      const s = baseState(
+        {},
+        { icemark: 5, sunset_bay: 2 },
+        { currentTurnSeat: 1, lastCaptureFromId: 'icemark', lastCaptureToId: 'sunset_bay' },
+      );
+      expect(() => engine.occupyCapturedTerritory(asRecord(s), 0, 1)).toThrow(
+        'It is not your turn.',
       );
     });
   });

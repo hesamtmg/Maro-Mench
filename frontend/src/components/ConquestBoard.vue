@@ -306,7 +306,7 @@ function nodeClasses(territoryId: string) {
              miniature sculpts) instead of flat circles, echoing how a
              physical board game marks armies with standee pieces. -->
         <g
-          v-for="node in nodePositions"
+          v-for="(node, nodeIndex) in nodePositions"
           :key="node.id"
           :class="nodeClasses(node.id)"
           class="cb-node"
@@ -334,7 +334,10 @@ function nodeClasses(territoryId: string) {
             :style="{ '--player-color': playerColor(ownerOf(node.id)) }"
           />
           <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
-          <text x="0" y="-13" class="cb-node-label">{{ node.name }}</text>
+          <!-- Alternating vertical offset breaks label collisions between
+               neighbors that happen to share almost the same y (a few real
+               -world clusters, e.g. Ironridge/Cragmoor, do). -->
+          <text x="0" :y="nodeIndex % 2 === 0 ? -13 : -10.5" class="cb-node-label">{{ node.name }}</text>
         </g>
       </svg>
 
@@ -584,14 +587,15 @@ function nodeClasses(territoryId: string) {
 }
 
 .cb-node-label {
-  font-size: 9px;
+  font-size: 6.2px;
+  font-weight: 600;
   fill: #fff;
   text-anchor: middle;
   pointer-events: none;
   paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.8);
-  stroke-width: 2;
-  opacity: 0;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 1.75;
+  opacity: 0.9;
   transition: opacity 0.1s ease;
 }
 
@@ -599,6 +603,7 @@ function nodeClasses(territoryId: string) {
 .cb-node-selected .cb-node-label,
 .cb-node-target .cb-node-label {
   opacity: 1;
+  font-size: 9px;
 }
 
 .cb-status-bar {
@@ -795,7 +800,7 @@ function nodeClasses(territoryId: string) {
 
 @media (max-width: 640px) {
   .cb-node-label {
-    display: none;
+    font-size: 6px;
   }
 }
 </style>

@@ -368,7 +368,7 @@ export class GameGateway
       currentTurnSeat: gameState.currentTurnSeat,
     });
 
-    this.scheduleTurnTimeoutFor(room.id);
+    this.scheduleTurnTimeoutFor(room);
   }
 
   /** Any seated player may pause an in-progress game -- freezes the turn
@@ -489,7 +489,7 @@ export class GameGateway
         seatIndex: player.seatIndex,
         diceValue: rollResult.diceValue,
       });
-      this.scheduleTurnTimeoutFor(room.id);
+      this.scheduleTurnTimeoutFor(room);
     }
   }
 
@@ -535,7 +535,7 @@ export class GameGateway
       );
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
-      this.scheduleTurnTimeoutFor(room.id);
+      this.scheduleTurnTimeoutFor(room);
     }
   }
 
@@ -596,7 +596,7 @@ export class GameGateway
         winnerSeat: payload.winnerSeat,
       });
     } else {
-      this.scheduleTurnTimeoutFor(room.id);
+      this.scheduleTurnTimeoutFor(room);
     }
   }
 
@@ -635,7 +635,7 @@ export class GameGateway
       );
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
-      this.scheduleTurnTimeoutFor(room.id);
+      this.scheduleTurnTimeoutFor(room);
     }
   }
 
@@ -1252,6 +1252,36 @@ export class GameGateway
     }
   }
 
+  /**
+   * Conquest-only: voluntarily passes the rest of the current player's
+   * turn from any phase, including mid-reinforce -- reuses the same
+   * auto-place-leftover-reinforcements-then-advance logic the turn
+   * -timeout scheduler falls back to, just triggered on demand instead of
+   * after the (now much longer) timer expires.
+   */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_PASS_TURN)
+  async onConquestPassTurn(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const moveResult = this.conquestEngine.forceEndTurn(gameState.boardState);
+      await this.applyAndBroadcastMove(room, gameState, player.seatIndex, 0, moveResult);
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   private async applyAndBroadcastMove(
     room: Room,
     gameState: Awaited<ReturnType<GameStateService['getGameState']>>,
@@ -1292,7 +1322,7 @@ export class GameGateway
         winnerSeat: moveResult.winnerSeat,
       });
     } else {
-      this.scheduleTurnTimeoutFor(room.id);
+      this.scheduleTurnTimeoutFor(room);
     }
   }
 
@@ -1359,7 +1389,7 @@ export class GameGateway
         nextTurnSeat: nextSeat,
       });
 
-      this.scheduleTurnTimeoutFor(roomId);
+      this.scheduleTurnTimeoutFor(room);
     } catch (err) {
       this.logger.warn(
         `Failed to skip turn for room ${roomId}: ${(err as Error).message}`,
@@ -1423,7 +1453,7 @@ export class GameGateway
         this.server
           .to(room.id)
           .emit(WS_EVENTS_OUT.MONOPOLY_STATE_UPDATED, { boardState: result.boardState });
-        this.scheduleTurnTimeoutFor(room.id);
+        this.scheduleTurnTimeoutFor(room);
       }
       return true;
     }
@@ -1460,10 +1490,24 @@ export class GameGateway
     return !!(state.pendingPurchase || state.auction || state.pendingDebt);
   }
 
-  private scheduleTurnTimeoutFor(roomId: string) {
-    this.scheduler.scheduleTurnTimeout(roomId, () => {
-      void this.skipCurrentTurn(roomId, 'timeout');
-    });
+  // Conquest turns get a much longer clock than the other games -- a
+  // single turn there can span placing several reinforcements plus
+  // multiple attack rolls, so the shared 30s default is too tight. Other
+  // games keep the shared default by passing undefined through.
+  private static readonly CONQUEST_TURN_TIMEOUT_MS = 10 * 60_000;
+
+  private scheduleTurnTimeoutFor(room: Room) {
+    const durationMs =
+      room.gameType.code === GameTypeCode.CONQUEST
+        ? GameGateway.CONQUEST_TURN_TIMEOUT_MS
+        : undefined;
+    this.scheduler.scheduleTurnTimeout(
+      room.id,
+      () => {
+        void this.skipCurrentTurn(room.id, 'timeout');
+      },
+      durationMs,
+    );
   }
 
   private broadcastRoomState(room: Room) {

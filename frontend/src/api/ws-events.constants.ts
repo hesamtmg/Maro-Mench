@@ -35,6 +35,7 @@ export const WS_EVENTS_IN = {
   CONQUEST_FORTIFY: 'conquest_fortify',
   CONQUEST_END_TURN: 'conquest_end_turn',
   CONQUEST_TRADE_CARDS: 'conquest_trade_cards',
+  CONQUEST_PASS_TURN: 'conquest_pass_turn',
 } as const;
 
 export const WS_EVENTS_OUT = {

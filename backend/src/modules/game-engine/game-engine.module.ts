@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConquestEngine } from './conquest/conquest.engine';
 import { GameEngineFactory } from './game-engine.factory';
 import { LudoEngine } from './ludo/ludo.engine';
 import { MonopolyEngine } from './monopoly/monopoly.engine';
@@ -11,12 +12,13 @@ import { SnakesLaddersEngine } from './snakes-ladders/snakes-ladders.engine';
     SnakesLaddersEngine,
     OloEngine,
     MonopolyEngine,
+    ConquestEngine,
     GameEngineFactory,
   ],
-  // MonopolyEngine is exported (not just LudoEngine/OloEngine/etc, which
-  // stay internal) because GameGateway injects it directly for the
-  // purchase-decision/build-house/pay-jail-fine events that fall outside
-  // the shared roll/move contract -- see game.gateway.ts.
-  exports: [GameEngineFactory, MonopolyEngine],
+  // MonopolyEngine/ConquestEngine are exported (not just LudoEngine/
+  // OloEngine/etc, which stay internal) because GameGateway injects them
+  // directly for the many game-specific events that fall outside the
+  // shared roll/move contract -- see game.gateway.ts.
+  exports: [GameEngineFactory, MonopolyEngine, ConquestEngine],
 })
 export class GameEngineModule {}

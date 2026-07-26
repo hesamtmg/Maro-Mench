@@ -34,6 +34,16 @@ export const WS_EVENTS_IN = {
   MONOPOLY_SELL_HOUSE: 'monopoly_sell_house', // { roomId, spaceIndex }
   MONOPOLY_PAY_DEBT: 'monopoly_pay_debt', // { roomId }
   MONOPOLY_DECLARE_BANKRUPTCY: 'monopoly_declare_bankruptcy', // { roomId }
+  // Conquest-only: reinforce/attack don't consume the turn (a player can
+  // attack repeatedly before fortifying), so they're separate from the
+  // turn-ending fortify/endTurn events -- same shared-contract mismatch as
+  // Monopoly's build-house vs. its actual dice-roll move.
+  CONQUEST_REINFORCE: 'conquest_reinforce', // { roomId, territoryId, count }
+  CONQUEST_ATTACK: 'conquest_attack', // { roomId, fromId, toId, diceCount }
+  CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase', // { roomId }
+  CONQUEST_FORTIFY: 'conquest_fortify', // { roomId, fromId, toId, count }
+  CONQUEST_END_TURN: 'conquest_end_turn', // { roomId }
+  CONQUEST_TRADE_CARDS: 'conquest_trade_cards', // { roomId, cardIds: string[] }
 } as const;
 
 // Server -> Client events
@@ -61,4 +71,6 @@ export const WS_EVENTS_OUT = {
   OLO_LIVE_POSITIONS: 'olo_live_positions', // relayed to the other player only
   OLO_SHOT_RESULT: 'olo_shot_result', // broadcast to the whole room
   MONOPOLY_STATE_UPDATED: 'monopoly_state_updated', // { boardState } -- build-house / pay-jail-fine, no turn change
+  CONQUEST_STATE_UPDATED: 'conquest_state_updated', // { boardState, seatIndex, ... } -- reinforce / end-attack-phase, no turn change
+  CONQUEST_ATTACK_RESULT: 'conquest_attack_result', // { boardState, seatIndex, combat } -- dice results, no turn change
 } as const;

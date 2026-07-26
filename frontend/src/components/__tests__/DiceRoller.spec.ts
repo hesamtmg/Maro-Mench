@@ -30,14 +30,14 @@ describe('DiceRoller', () => {
     const wrapper = mount(DiceRoller, {
       props: { value: 3, isRolling: true },
     });
-    expect(wrapper.find('.die').classes()).toContain('die-rolling');
+    expect(wrapper.find('.die-wrap').classes()).toContain('die-rolling');
   });
 
   it('does not apply the rolling class when isRolling is false', () => {
     const wrapper = mount(DiceRoller, {
       props: { value: 3, isRolling: false },
     });
-    expect(wrapper.find('.die').classes()).not.toContain('die-rolling');
+    expect(wrapper.find('.die-wrap').classes()).not.toContain('die-rolling');
   });
 
   it.each([1, 2, 3, 4, 5, 6])(

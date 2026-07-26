@@ -67,6 +67,7 @@ const createMaxPlayersLimit = computed(() => {
   if (createGameType.value === 'ludo') return 4;
   if (createGameType.value === 'olo') return 2;
   if (createGameType.value === 'monopoly') return 6;
+  if (createGameType.value === 'conquest') return 6;
   return 16;
 });
 
@@ -177,7 +178,8 @@ onMounted(() => {
     gameParam === 'ludo' ||
     gameParam === 'snakes_ladders' ||
     gameParam === 'olo' ||
-    gameParam === 'monopoly'
+    gameParam === 'monopoly' ||
+    gameParam === 'conquest'
   ) {
     createGameType.value = gameParam;
     publicRoomsGameFilter.value = gameParam;
@@ -263,6 +265,7 @@ onUnmounted(() => {
           <option value="snakes_ladders">Snakes &amp; Ladders</option>
           <option value="olo">OLO</option>
             <option value="monopoly">Monopoly</option>
+            <option value="conquest">Conquest</option>
         </select>
         <button class="btn btn-secondary" @click="loadPublicRooms">
           Refresh
@@ -317,6 +320,7 @@ onUnmounted(() => {
             </option>
             <option value="olo">OLO</option>
             <option value="monopoly">Monopoly</option>
+            <option value="conquest">Conquest</option>
           </select>
         </div>
 
@@ -387,6 +391,7 @@ onUnmounted(() => {
           <option value="snakes_ladders">Snakes &amp; Ladders </option>
           <option value="olo">OLO</option>
             <option value="monopoly">Monopoly</option>
+            <option value="conquest">Conquest</option>
         </select>
       </div>
 

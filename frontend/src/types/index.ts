@@ -1,4 +1,4 @@
-export type GameTypeCode = 'ludo' | 'snakes_ladders' | 'olo' | 'monopoly';
+export type GameTypeCode = 'ludo' | 'snakes_ladders' | 'olo' | 'monopoly' | 'conquest';
 
 export interface GameType {
   code: GameTypeCode;

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { roomsApi } from "../api/rooms.api";
+import ConquestBoard from "../components/ConquestBoard.vue";
 import DiceRoller from "../components/DiceRoller.vue";
 import LudoBoard from "../components/LudoBoard.vue";
 import { FINISHED_POSITION } from "../components/ludo/board-geometry";
@@ -330,6 +331,42 @@ function monopolyBankrupt(seatIndex: number): boolean {
   return state?.players?.[seatIndex]?.bankrupt ?? false;
 }
 
+function conquestTerritoryCount(seatIndex: number): number {
+  const state = roomStore.boardState as { owner?: Record<string, number> } | null;
+  return Object.values(state?.owner ?? {}).filter((s) => s === seatIndex).length;
+}
+
+function conquestEliminated(seatIndex: number): boolean {
+  const state = roomStore.boardState as {
+    players?: Record<number, { eliminated: boolean }>;
+  } | null;
+  return state?.players?.[seatIndex]?.eliminated ?? false;
+}
+
+function handleConquestReinforce(territoryId: string, count: number) {
+  roomStore.conquestReinforce(props.id, territoryId, count);
+}
+
+function handleConquestAttack(fromId: string, toId: string, diceCount: number) {
+  roomStore.conquestAttack(props.id, fromId, toId, diceCount);
+}
+
+function handleConquestEndAttackPhase() {
+  roomStore.conquestEndAttackPhase(props.id);
+}
+
+function handleConquestFortify(fromId: string, toId: string, count: number) {
+  roomStore.conquestFortify(props.id, fromId, toId, count);
+}
+
+function handleConquestEndTurn() {
+  roomStore.conquestEndTurn(props.id);
+}
+
+function handleConquestTradeCards(cardIds: string[]) {
+  roomStore.conquestTradeCards(props.id, cardIds);
+}
+
 function monopolyInJail(seatIndex: number): boolean {
   const state = roomStore.boardState as {
     players?: Record<number, { inJail: boolean }>;
@@ -478,7 +515,9 @@ onMounted(() => {
               </span>
             </span>
 
-            <template v-if="gameTypeCode !== 'olo' && !roomStore.isPaused">
+            <template
+              v-if="gameTypeCode !== 'olo' && gameTypeCode !== 'conquest' && !roomStore.isPaused"
+            >
               <span class="turn-divider" />
 
               <!-- Monopoly rolls two d6s; lastDiceValue is their sum
@@ -627,6 +666,10 @@ onMounted(() => {
                   ${{ monopolyCash(player.seatIndex) }}
                   <template v-if="monopolyBankrupt(player.seatIndex)">· bankrupt</template>
                 </span>
+                <span v-else-if="gameTypeCode === 'conquest'" class="text-muted">
+                  {{ conquestTerritoryCount(player.seatIndex) }} territories
+                  <template v-if="conquestEliminated(player.seatIndex)">· eliminated</template>
+                </span>
                 <span v-if="gameTypeCode === 'monopoly'" class="expand-caret">
                   {{ expandedMonopolySeat === player.seatIndex ? '▲' : '▼' }}
                 </span>
@@ -745,6 +788,21 @@ onMounted(() => {
             @pay-debt="handleMonopolyPayDebt"
             @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
           />
+          <ConquestBoard
+            v-else-if="gameTypeCode === 'conquest'"
+            :board-state="roomStore.boardState as any"
+            :players="roomStore.room.players"
+            :current-turn-seat="roomStore.currentTurnSeat"
+            :my-seat-index="myPlayer?.seatIndex ?? null"
+            :last-combat="roomStore.conquestLastCombat"
+            hide-player-summary
+            @reinforce="handleConquestReinforce"
+            @attack="handleConquestAttack"
+            @end-attack-phase="handleConquestEndAttackPhase"
+            @fortify="handleConquestFortify"
+            @end-turn="handleConquestEndTurn"
+            @trade-cards="handleConquestTradeCards"
+          />
 
           <div v-if="roomStore.isPaused" class="paused-overlay">
             <div class="paused-card">
@@ -810,6 +868,20 @@ onMounted(() => {
           @unmortgage="handleMonopolyUnmortgage"
           @pay-debt="handleMonopolyPayDebt"
           @declare-bankruptcy="handleMonopolyDeclareBankruptcy"
+        />
+        <ConquestBoard
+          v-else-if="gameTypeCode === 'conquest'"
+          :board-state="roomStore.boardState as any"
+          :players="roomStore.room.players"
+          :current-turn-seat="roomStore.currentTurnSeat"
+          :my-seat-index="myPlayer?.seatIndex ?? null"
+          :last-combat="roomStore.conquestLastCombat"
+          @reinforce="handleConquestReinforce"
+          @attack="handleConquestAttack"
+          @end-attack-phase="handleConquestEndAttackPhase"
+          @fortify="handleConquestFortify"
+          @end-turn="handleConquestEndTurn"
+          @trade-cards="handleConquestTradeCards"
         />
 
           <div v-if="roomStore.isPaused" class="paused-overlay">

@@ -29,6 +29,12 @@ export const WS_EVENTS_IN = {
   MONOPOLY_SELL_HOUSE: 'monopoly_sell_house',
   MONOPOLY_PAY_DEBT: 'monopoly_pay_debt',
   MONOPOLY_DECLARE_BANKRUPTCY: 'monopoly_declare_bankruptcy',
+  CONQUEST_REINFORCE: 'conquest_reinforce',
+  CONQUEST_ATTACK: 'conquest_attack',
+  CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase',
+  CONQUEST_FORTIFY: 'conquest_fortify',
+  CONQUEST_END_TURN: 'conquest_end_turn',
+  CONQUEST_TRADE_CARDS: 'conquest_trade_cards',
 } as const;
 
 export const WS_EVENTS_OUT = {
@@ -55,4 +61,6 @@ export const WS_EVENTS_OUT = {
   OLO_LIVE_POSITIONS: 'olo_live_positions',
   OLO_SHOT_RESULT: 'olo_shot_result',
   MONOPOLY_STATE_UPDATED: 'monopoly_state_updated',
+  CONQUEST_STATE_UPDATED: 'conquest_state_updated',
+  CONQUEST_ATTACK_RESULT: 'conquest_attack_result',
 } as const;

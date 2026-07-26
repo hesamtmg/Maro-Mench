@@ -30,6 +30,7 @@ export const WS_EVENTS_IN = {
   MONOPOLY_PAY_DEBT: 'monopoly_pay_debt',
   MONOPOLY_DECLARE_BANKRUPTCY: 'monopoly_declare_bankruptcy',
   CONQUEST_REINFORCE: 'conquest_reinforce',
+  CONQUEST_RESET_REINFORCEMENTS: 'conquest_reset_reinforcements',
   CONQUEST_MOVE_ARMIES: 'conquest_move_armies',
   CONQUEST_ATTACK: 'conquest_attack',
   CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase',

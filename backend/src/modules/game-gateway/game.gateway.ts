@@ -1083,6 +1083,38 @@ export class GameGateway
     }
   }
 
+  /** Conquest-only: undoes every reinforcement placed on the pool so far this reinforce phase. */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_RESET_REINFORCEMENTS)
+  async onConquestResetReinforcements(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.conquestEngine.resetReinforcements(
+        gameState.boardState,
+        player.seatIndex,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        reinforcementsReset: true,
+      });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   /**
    * Conquest-only: freely repositions armies between two owned territories
    * during the reinforce or fortify phase (no adjacency required). Doesn't

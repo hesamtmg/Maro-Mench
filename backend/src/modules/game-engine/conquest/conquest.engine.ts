@@ -35,6 +35,11 @@ export interface ConquestState {
   // Whether the current turn's player has captured at least one territory
   // so far this turn -- drives whether they draw a card when the turn ends.
   capturedTerritoryThisTurn: boolean;
+  // Reinforcements placed on each territory so far *this* reinforce phase
+  // (pool placements only, not moveArmies repositioning or card-trade
+  // bonuses) -- lets a misclick be undone via resetReinforcements. Cleared
+  // at the start of every reinforce phase.
+  reinforcementsPlacedThisTurn: Record<string, number>;
 }
 
 // Bonus reinforcement armies for the Nth set traded in (0-indexed),
@@ -102,6 +107,7 @@ function cloneState(state: ConquestState): ConquestState {
     ),
     cardsTradedInCount: state.cardsTradedInCount,
     capturedTerritoryThisTurn: state.capturedTerritoryThisTurn,
+    reinforcementsPlacedThisTurn: { ...state.reinforcementsPlacedThisTurn },
   };
 }
 
@@ -212,6 +218,7 @@ export class ConquestEngine implements GameEngine {
       hands,
       cardsTradedInCount: 0,
       capturedTerritoryThisTurn: false,
+      reinforcementsPlacedThisTurn: {},
     };
     state.reinforcementsRemaining = reinforcementsFor(state, state.currentTurnSeat);
 
@@ -257,9 +264,38 @@ export class ConquestEngine implements GameEngine {
 
     state.armies[territoryId] += count;
     state.reinforcementsRemaining -= count;
+    state.reinforcementsPlacedThisTurn[territoryId] =
+      (state.reinforcementsPlacedThisTurn[territoryId] ?? 0) + count;
     if (state.reinforcementsRemaining === 0) {
       state.phase = 'attack';
     }
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /**
+   * Undoes every reinforcement placed on the pool so far this reinforce
+   * phase, returning the armies to reinforcementsRemaining. Only reverts
+   * reinforce()'s pool placements -- not moveArmies repositioning or
+   * card-trade bonuses -- and only while still in the reinforce phase (once
+   * the last army placed auto-advances to attack, there's nothing left to
+   * reset).
+   */
+  resetReinforcements(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as ConquestState);
+    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
+    if (state.phase !== 'reinforce') throw new Error('Not in the reinforce phase.');
+
+    let restored = 0;
+    for (const [territoryId, count] of Object.entries(state.reinforcementsPlacedThisTurn)) {
+      state.armies[territoryId] -= count;
+      restored += count;
+    }
+    state.reinforcementsRemaining += restored;
+    state.reinforcementsPlacedThisTurn = {};
 
     return state as unknown as Record<string, unknown>;
   }
@@ -523,6 +559,7 @@ export class ConquestEngine implements GameEngine {
     state.currentTurnSeat = next;
     state.phase = 'reinforce';
     state.reinforcementsRemaining = reinforcementsFor(state, next);
+    state.reinforcementsPlacedThisTurn = {};
     return {
       boardState: state as unknown as Record<string, unknown>,
       nextTurnSeat: next,

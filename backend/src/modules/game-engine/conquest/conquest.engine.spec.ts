@@ -55,6 +55,7 @@ function baseState(
     hands: { 0: [], 1: [] },
     cardsTradedInCount: 0,
     capturedTerritoryThisTurn: false,
+    reinforcementsPlacedThisTurn: {},
     ...stateOverrides,
   };
 }
@@ -137,6 +138,15 @@ describe('ConquestEngine', () => {
       expect(result.armies.icemark).toBe(4);
       expect(result.reinforcementsRemaining).toBe(2);
       expect(result.phase).toBe('reinforce');
+      expect(result.reinforcementsPlacedThisTurn).toEqual({ icemark: 3 });
+    });
+
+    it('accumulates repeated placements on the same territory in the ledger', () => {
+      const state = baseState({}, {}, { phase: 'reinforce', reinforcementsRemaining: 5 });
+      const first = engine.reinforce(asRecord(state), 0, 'icemark', 2) as unknown as ConquestState;
+      const second = engine.reinforce(asRecord(first), 0, 'icemark', 1) as unknown as ConquestState;
+      expect(second.armies.icemark).toBe(4);
+      expect(second.reinforcementsPlacedThisTurn).toEqual({ icemark: 3 });
     });
 
     it('auto-advances to the attack phase once the pool is exhausted', () => {
@@ -183,6 +193,52 @@ describe('ConquestEngine', () => {
         { phase: 'reinforce', reinforcementsRemaining: 3, currentTurnSeat: 1 },
       );
       expect(() => engine.reinforce(asRecord(state), 0, 'icemark', 1)).toThrow(
+        'It is not your turn.',
+      );
+    });
+  });
+
+  describe('resetReinforcements', () => {
+    it('undoes every placement made this turn and refunds the pool', () => {
+      const state = baseState({}, {}, { phase: 'reinforce', reinforcementsRemaining: 7 });
+      const afterFirst = engine.reinforce(asRecord(state), 0, 'icemark', 2) as unknown as ConquestState;
+      const afterSecond = engine.reinforce(
+        asRecord(afterFirst),
+        0,
+        'glacier_reach',
+        3,
+      ) as unknown as ConquestState;
+      expect(afterSecond.reinforcementsRemaining).toBe(2);
+
+      const reset = engine.resetReinforcements(asRecord(afterSecond), 0) as unknown as ConquestState;
+      expect(reset.armies.icemark).toBe(1);
+      expect(reset.armies.glacier_reach).toBe(1);
+      expect(reset.reinforcementsRemaining).toBe(7);
+      expect(reset.reinforcementsPlacedThisTurn).toEqual({});
+      expect(reset.phase).toBe('reinforce');
+    });
+
+    it('is a no-op when nothing has been placed yet', () => {
+      const state = baseState({}, {}, { phase: 'reinforce', reinforcementsRemaining: 5 });
+      const reset = engine.resetReinforcements(asRecord(state), 0) as unknown as ConquestState;
+      expect(reset.reinforcementsRemaining).toBe(5);
+      expect(reset.reinforcementsPlacedThisTurn).toEqual({});
+    });
+
+    it('rejects resetting outside the reinforce phase', () => {
+      const state = baseState({}, {}, { phase: 'attack' });
+      expect(() => engine.resetReinforcements(asRecord(state), 0)).toThrow(
+        'Not in the reinforce phase.',
+      );
+    });
+
+    it("rejects acting when it isn't your turn", () => {
+      const state = baseState(
+        {},
+        {},
+        { phase: 'reinforce', reinforcementsRemaining: 3, currentTurnSeat: 1 },
+      );
+      expect(() => engine.resetReinforcements(asRecord(state), 0)).toThrow(
         'It is not your turn.',
       );
     });

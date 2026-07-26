@@ -11,6 +11,7 @@ import {
   type CardDef,
 } from "./conquest/board-config";
 import { CONTINENT_PATHS } from "./conquest/continent-paths";
+import { TERRITORY_PATHS } from "./conquest/territory-paths";
 import type { RoomPlayer } from "../types";
 import type { ConquestCombatResult } from "../stores/room.store";
 import { playHooray } from "../lib/game-sounds";
@@ -26,6 +27,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   reinforce: [territoryId: string, count: number];
+  "reset-reinforcements": [];
   "move-armies": [fromId: string, toId: string, count: number];
   attack: [fromId: string, toId: string, diceCount: number];
   "end-attack-phase": [];
@@ -46,6 +48,7 @@ interface ConquestStateShape {
   currentTurnSeat: number;
   phase: "reinforce" | "attack" | "fortify";
   reinforcementsRemaining: number;
+  reinforcementsPlacedThisTurn: Record<string, number>;
   hands: Record<number, CardDef[]>;
   cardsTradedInCount: number;
 }
@@ -275,6 +278,25 @@ function armiesOn(territoryId: string): number {
   return state.value?.armies[territoryId] ?? 0;
 }
 
+// A stacked-up territory gets a rank badge on top of its army count, purely
+// cosmetic escalation (generic real-world rank names, highest count first
+// so the first match wins).
+const ARMY_RANK_TIERS: { min: number; name: string; color: string }[] = [
+  { min: 40, name: "General", color: "#e5e4e2" },
+  { min: 25, name: "Major", color: "#ffd700" },
+  { min: 15, name: "Captain", color: "#c0c0c0" },
+  { min: 10, name: "Sergeant", color: "#cd7f32" },
+  { min: 6, name: "Corporal", color: "#8a5a2b" },
+];
+function armyRankFor(count: number): { name: string; color: string } | null {
+  return ARMY_RANK_TIERS.find((tier) => count >= tier.min) ?? null;
+}
+const armyRankByTerritory = computed(() => {
+  const map: Record<string, { name: string; color: string } | null> = {};
+  for (const t of TERRITORIES) map[t.id] = armyRankFor(armiesOn(t.id));
+  return map;
+});
+
 function isEliminated(seatIndex: number): boolean {
   return state.value?.players[seatIndex]?.eliminated ?? false;
 }
@@ -466,6 +488,26 @@ const continentLabelPositions = computed(() =>
   })
 );
 
+// Lightens/darkens a #rrggbb color by `percent` (-100..100) -- used to turn
+// each continent's flat base color into a highlight/shadow pair for the
+// gradient that gives the landmass a subtle raised, globe-lit look.
+function shadeColor(hex: string, percent: number): string {
+  const num = parseInt(hex.slice(1), 16);
+  const amt = Math.round((percent / 100) * 255);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const r = clamp((num >> 16) + amt);
+  const g = clamp(((num >> 8) & 0xff) + amt);
+  const b = clamp((num & 0xff) + amt);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+const continentGradientStops = computed(() =>
+  CONTINENTS.map((c) => {
+    const base = CONTINENT_COLORS[c.id];
+    return { id: c.id, light: shadeColor(base, 28), base, dark: shadeColor(base, -30) };
+  })
+);
+
 // --- Selection / interaction ---
 
 const selectedFrom = ref<string | null>(null);
@@ -623,6 +665,14 @@ function passTurn() {
   emit("pass-turn");
 }
 
+const canResetReinforcements = computed(
+  () => Object.keys(state.value?.reinforcementsPlacedThisTurn ?? {}).length > 0
+);
+
+function resetReinforcements() {
+  emit("reset-reinforcements");
+}
+
 // --- Battle result panel ---
 
 const rollingCombat = ref(false);
@@ -661,6 +711,28 @@ function nodeClasses(territoryId: string) {
         @pointerup="onMapPointerUp"
         @pointercancel="onMapPointerUp"
       >
+        <!-- Per-continent highlight/shadow gradient + a shared drop-shadow
+             filter give the flat landmass fills a subtly raised, globe-lit
+             look instead of flat color fills. -->
+        <defs>
+          <radialGradient
+            v-for="g in continentGradientStops"
+            :id="`cb-continent-grad-${g.id}`"
+            :key="`grad-${g.id}`"
+            cx="35%"
+            cy="30%"
+            r="85%"
+            gradientUnits="objectBoundingBox"
+          >
+            <stop offset="0%" :stop-color="g.light" />
+            <stop offset="55%" :stop-color="g.base" />
+            <stop offset="100%" :stop-color="g.dark" />
+          </radialGradient>
+          <filter id="cb-landmass-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="1.4" stdDeviation="1.6" flood-color="#000" flood-opacity="0.45" />
+          </filter>
+        </defs>
+
         <!-- Actual world coastlines, generated from public-domain Natural
              Earth geographic data (see continent-paths.ts) -- an original
              render of real geography, not traced from any game's art. -->
@@ -668,8 +740,23 @@ function nodeClasses(territoryId: string) {
           v-for="c in CONTINENTS"
           :key="c.id"
           :d="CONTINENT_PATHS[c.id]"
-          :fill="CONTINENT_COLORS[c.id]"
+          :fill="`url(#cb-continent-grad-${c.id})`"
+          filter="url(#cb-landmass-shadow)"
           class="cb-landmass"
+        />
+
+        <!-- Per-territory boundary polygons -- Voronoi-tessellated around
+             each territory's node and clipped to the real coastline (see
+             territory-paths.ts), tinted by whoever currently owns it so
+             ownership reads at a glance instead of just from the node
+             markers. Sits over the continent's 3D-shaded base fill, which
+             still shows through the tint. -->
+        <path
+          v-for="t in TERRITORIES"
+          :key="`boundary-${t.id}`"
+          :d="TERRITORY_PATHS[t.id]"
+          :fill="playerColor(ownerOf(t.id))"
+          class="cb-territory-boundary"
         />
 
         <line
@@ -696,7 +783,7 @@ function nodeClasses(territoryId: string) {
           :transform="`translate(${node.cx}, ${node.cy})`"
           @click="onTerritoryClick(node.id)"
         >
-          <title>{{ node.name }}</title>
+          <title>{{ node.name }}{{ armyRankByTerritory[node.id] ? ` — ${armyRankByTerritory[node.id]!.name}` : "" }}</title>
           <circle cx="0" cy="0" r="8" class="cb-node-plinth" />
           <ellipse cx="0" cy="5.4" rx="3.6" ry="1.3" class="cb-soldier-shadow" />
           <g class="cb-soldier" :fill="playerColor(ownerOf(node.id))">
@@ -714,7 +801,11 @@ function nodeClasses(territoryId: string) {
             cy="3.4"
             r="3.6"
             class="cb-node-armybadge"
-            :style="{ '--player-color': playerColor(ownerOf(node.id)) }"
+            :class="{ 'cb-node-armybadge-ranked': armyRankByTerritory[node.id] }"
+            :style="{
+              '--player-color': playerColor(ownerOf(node.id)),
+              '--rank-color': armyRankByTerritory[node.id]?.color,
+            }"
           />
           <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
           <!-- Alternating vertical offset breaks label collisions between
@@ -861,6 +952,14 @@ function nodeClasses(territoryId: string) {
             Includes +{{ myContinentBonus.total }} for holding
             {{ myContinentBonus.continents.map((c) => c.name).join(", ") }}
           </p>
+          <button
+            v-if="canResetReinforcements"
+            class="btn btn-secondary cb-reset-btn"
+            title="Undo every army you've placed this turn and return them to your pool"
+            @click="resetReinforcements"
+          >
+            ↩️ Reset reinforcements
+          </button>
 
           <div class="cb-move-armies">
             <p class="cb-move-armies-title">
@@ -1203,6 +1302,14 @@ function nodeClasses(territoryId: string) {
   stroke-width: 0.75;
 }
 
+.cb-territory-boundary {
+  fill-opacity: 0.4;
+  stroke: rgba(10, 10, 20, 0.55);
+  stroke-width: 0.6;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .cb-edge {
   stroke: rgba(255, 255, 255, 0.35);
   stroke-width: 1.5;
@@ -1268,6 +1375,14 @@ function nodeClasses(territoryId: string) {
   fill: #1a2033;
   stroke: var(--player-color, #999);
   stroke-width: 1;
+}
+
+/* A territory holding a big stack of armies gets a thicker, rank-colored
+   ring around its count badge instead of the plain owner-color ring --
+   glance-able escalation without cluttering the tiny node marker. */
+.cb-node-armybadge-ranked {
+  stroke: var(--rank-color, var(--player-color, #999));
+  stroke-width: 1.6;
 }
 
 .cb-node-armies {
@@ -1387,7 +1502,7 @@ function nodeClasses(territoryId: string) {
 }
 
 .conquest-side {
-  flex: 0 0 260px;
+  flex: 0 0 290px;
   min-width: 220px;
   display: flex;
   flex-direction: column;
@@ -1511,6 +1626,11 @@ function nodeClasses(territoryId: string) {
 .cb-continue-attack-btn {
   width: 100%;
   margin-top: 0.5rem;
+}
+
+.cb-reset-btn {
+  width: 100%;
+  margin-top: 0.4rem;
 }
 
 .cb-move-armies {
@@ -1657,14 +1777,17 @@ function nodeClasses(territoryId: string) {
   flex-direction: column;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem 0.4rem;
   border-radius: var(--radius);
   background: var(--color-surface);
   border: 1.5px solid var(--color-border);
   color: var(--color-text);
   cursor: pointer;
-  font-size: 0.68rem;
-  min-width: 4.2rem;
+  font-size: 0.62rem;
+  /* Fixed (not just min-) width so long territory names wrap onto a
+     second line instead of stretching the button wide -- without this,
+     a narrow sidebar column (desktop) only fits one card per row. */
+  width: 4.2rem;
   transition:
     border-color 0.1s ease,
     transform 0.1s ease;
@@ -1691,6 +1814,8 @@ function nodeClasses(territoryId: string) {
 .cb-card-name {
   text-align: center;
   line-height: 1.1;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .cb-trade-btn {

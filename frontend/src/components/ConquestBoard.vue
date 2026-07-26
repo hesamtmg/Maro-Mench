@@ -74,6 +74,24 @@ function isEliminated(seatIndex: number): boolean {
   return state.value?.players[seatIndex]?.eliminated ?? false;
 }
 
+function territoryCountFor(seatIndex: number): number {
+  return Object.values(state.value?.owner ?? {}).filter((s) => s === seatIndex).length;
+}
+
+function totalArmiesFor(seatIndex: number): number {
+  const s = state.value;
+  if (!s) return 0;
+  return Object.entries(s.owner)
+    .filter(([, owner]) => owner === seatIndex)
+    .reduce((sum, [id]) => sum + (s.armies[id] ?? 0), 0);
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  reinforce: "Reinforce",
+  attack: "Attack",
+  fortify: "Fortify",
+};
+
 // Continents currently fully owned by a seat, for showing why their
 // reinforcement count is bigger than the base territory-count math alone
 // would suggest.
@@ -269,65 +287,105 @@ function nodeClasses(territoryId: string) {
 
 <template>
   <div class="conquest-wrap">
-    <svg
-      class="conquest-map"
-      :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <circle
-        v-for="blob in continentBlobs"
-        :key="blob.id"
-        :cx="blob.cx"
-        :cy="blob.cy"
-        :r="blob.r"
-        :fill="blob.color"
-        class="cb-continent-blob"
-      />
-
-      <line
-        v-for="edge in edgeLines"
-        :key="`${edge.a}-${edge.b}`"
-        :x1="edge.x1"
-        :y1="edge.y1"
-        :x2="edge.x2"
-        :y2="edge.y2"
-        class="cb-edge"
-      />
-
-      <g
-        v-for="node in nodePositions"
-        :key="node.id"
-        :class="nodeClasses(node.id)"
-        class="cb-node"
-        @click="onTerritoryClick(node.id)"
+    <div class="conquest-main">
+      <svg
+        class="conquest-map"
+        :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
+        preserveAspectRatio="xMidYMid meet"
       >
-        <circle
-          :cx="node.cx"
-          :cy="node.cy"
-          r="17"
-          :fill="playerColor(ownerOf(node.id))"
-          class="cb-node-circle"
+        <defs>
+          <filter id="cb-goo">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="blur" />
+            <feColorMatrix
+              in="blur"
+              mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9"
+              result="goo"
+            />
+          </filter>
+        </defs>
+
+        <!-- Original fictional landmasses (not a real-world map): each
+             continent is a cluster of overlapping circles merged into one
+             organic blob via an SVG goo filter, one blob group per
+             continent so they read as solid regions rather than a bare
+             node graph. -->
+        <g v-for="c in CONTINENTS" :key="c.id" filter="url(#cb-goo)">
+          <circle
+            v-for="t in TERRITORIES.filter((t) => t.continentId === c.id)"
+            :key="t.id"
+            :cx="t.x * VIEW_W"
+            :cy="t.y * VIEW_H"
+            r="62"
+            :fill="CONTINENT_COLORS[c.id]"
+            class="cb-landmass"
+          />
+        </g>
+
+        <line
+          v-for="edge in edgeLines"
+          :key="`${edge.a}-${edge.b}`"
+          :x1="edge.x1"
+          :y1="edge.y1"
+          :x2="edge.x2"
+          :y2="edge.y2"
+          class="cb-edge"
+          :class="{ 'cb-edge-strait': nodeById[edge.a].continentId !== nodeById[edge.b].continentId }"
         />
-        <text :x="node.cx" :y="node.cy + 4" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
-        <text :x="node.cx" :y="node.cy + 30" class="cb-node-label">{{ node.name }}</text>
-      </g>
-    </svg>
+
+        <g
+          v-for="node in nodePositions"
+          :key="node.id"
+          :class="nodeClasses(node.id)"
+          class="cb-node"
+          @click="onTerritoryClick(node.id)"
+        >
+          <circle :cx="node.cx + 1.5" :cy="node.cy + 2.5" r="19" class="cb-node-shadow" />
+          <circle
+            :cx="node.cx"
+            :cy="node.cy"
+            r="19"
+            :fill="playerColor(ownerOf(node.id))"
+            class="cb-node-circle"
+          />
+          <ellipse :cx="node.cx - 6" :cy="node.cy - 7" rx="9" ry="6" class="cb-node-gloss" />
+          <text :x="node.cx" :y="node.cy + 5" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
+          <text :x="node.cx" :y="node.cy + 32" class="cb-node-label">{{ node.name }}</text>
+        </g>
+      </svg>
+
+      <div v-if="state" class="cb-status-bar">
+        <span class="cb-status-dot" :style="{ background: playerColor(currentTurnSeat) }" />
+        <strong>{{ nameForSeat(currentTurnSeat) }}</strong>
+        <span class="cb-status-phase" :class="`cb-phase-${state.phase}`">{{
+          PHASE_LABEL[state.phase]
+        }}</span>
+        <span v-if="state.phase === 'reinforce'" class="cb-status-pool">
+          {{ isMyTurn ? state.reinforcementsRemaining : "" }}
+        </span>
+      </div>
+    </div>
 
     <div class="conquest-side">
-      <div v-if="!hidePlayerSummary" class="card cb-players">
-        <h4 class="panel-title">Players</h4>
+      <div v-if="!hidePlayerSummary" class="cb-players">
         <div
           v-for="p in players"
           :key="p.userId"
-          class="cb-player-row"
-          :class="{ 'cb-player-active': p.seatIndex === currentTurnSeat }"
+          class="cb-player-card"
+          :class="{ 'cb-player-active': p.seatIndex === currentTurnSeat, 'cb-player-out': isEliminated(p.seatIndex) }"
+          :style="{ '--player-color': p.color ?? '#999' }"
         >
-          <span class="cb-player-dot" :style="{ background: p.color ?? '#999' }" />
-          <strong>{{ p.displayName }}</strong>
-          <span v-if="isEliminated(p.seatIndex)" class="text-muted">💀 eliminated</span>
-          <span v-else class="text-muted">
-            {{ Object.values(state?.owner ?? {}).filter((s) => s === p.seatIndex).length }} territories
-          </span>
+          <span class="cb-player-avatar" :style="{ background: p.color ?? '#999' }">{{
+            p.displayName.charAt(0).toUpperCase()
+          }}</span>
+          <div class="cb-player-info">
+            <strong>{{ p.displayName }}</strong>
+            <span v-if="isEliminated(p.seatIndex)" class="text-muted">💀 eliminated</span>
+            <div v-else class="cb-player-stats">
+              <span class="cb-stat">🚩 {{ territoryCountFor(p.seatIndex) }}</span>
+              <span class="cb-stat">⚔️ {{ totalArmiesFor(p.seatIndex) }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -443,23 +501,35 @@ function nodeClasses(territoryId: string) {
   align-items: flex-start;
 }
 
-.conquest-map {
+.conquest-main {
   flex: 1 1 560px;
   min-width: 280px;
-  width: 100%;
   max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.conquest-map {
+  width: 100%;
   aspect-ratio: 1000 / 780;
-  background: var(--color-surface);
+  background: radial-gradient(ellipse at 50% 40%, #1c2b45, #0f1524);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
 
-.cb-continent-blob {
-  opacity: 0.14;
+.cb-landmass {
+  opacity: 0.62;
 }
 
 .cb-edge {
-  stroke: var(--color-border);
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.cb-edge-strait {
+  stroke: rgba(255, 255, 255, 0.55);
   stroke-width: 2;
 }
 
@@ -467,14 +537,23 @@ function nodeClasses(territoryId: string) {
   cursor: pointer;
 }
 
+.cb-node-shadow {
+  fill: rgba(0, 0, 0, 0.45);
+}
+
 .cb-node-circle {
-  stroke: rgba(0, 0, 0, 0.35);
+  stroke: rgba(0, 0, 0, 0.45);
   stroke-width: 2;
   transition: r 0.15s ease;
 }
 
+.cb-node-gloss {
+  fill: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
 .cb-node:hover .cb-node-circle {
-  stroke: rgba(255, 255, 255, 0.8);
+  stroke: rgba(255, 255, 255, 0.85);
 }
 
 .cb-node-selected .cb-node-circle {
@@ -494,8 +573,8 @@ function nodeClasses(territoryId: string) {
 }
 
 .cb-node-armies {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 800;
   fill: #fff;
   text-anchor: middle;
   paint-order: stroke;
@@ -506,9 +585,68 @@ function nodeClasses(territoryId: string) {
 
 .cb-node-label {
   font-size: 11px;
-  fill: var(--color-text);
+  fill: #fff;
   text-anchor: middle;
   pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.75);
+  stroke-width: 2.5;
+}
+
+.cb-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.cb-status-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cb-status-phase {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+}
+
+.cb-phase-reinforce {
+  background: rgba(56, 172, 106, 0.25);
+  color: #4ade80;
+}
+
+.cb-phase-attack {
+  background: rgba(235, 77, 75, 0.25);
+  color: #f87171;
+}
+
+.cb-phase-fortify {
+  background: rgba(52, 85, 219, 0.25);
+  color: #60a5fa;
+}
+
+.cb-status-pool {
+  min-width: 2.2rem;
+  height: 2.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #a78bfa, #6d28d9);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
 .conquest-side {
@@ -531,27 +669,59 @@ function nodeClasses(territoryId: string) {
 .cb-players {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.4rem;
 }
 
-.cb-player-row {
+.cb-player-card {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.4rem;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
   border-radius: var(--radius);
-  font-size: 0.8rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--player-color, #999);
 }
 
 .cb-player-active {
   background: rgba(147, 51, 234, 0.18);
 }
 
-.cb-player-dot {
-  width: 12px;
-  height: 12px;
+.cb-player-out {
+  opacity: 0.55;
+}
+
+.cb-player-avatar {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.3);
+}
+
+.cb-player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+
+.cb-player-stats {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.cb-stat {
+  white-space: nowrap;
 }
 
 .cb-action {

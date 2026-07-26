@@ -69,6 +69,13 @@ const secondsLeft = computed(() => {
   return Math.max(0, Math.ceil((roomStore.turnDeadline - now.value) / 1000));
 });
 
+const timeLeftLabel = computed(() => {
+  if (secondsLeft.value == null) return "";
+  const m = Math.floor(secondsLeft.value / 60);
+  const s = secondsLeft.value % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+});
+
 async function initRoom() {
   isLoading.value = true;
   loadError.value = "";
@@ -347,6 +354,10 @@ function handleConquestReinforce(territoryId: string, count: number) {
   roomStore.conquestReinforce(props.id, territoryId, count);
 }
 
+function handleConquestResetReinforcements() {
+  roomStore.conquestResetReinforcements(props.id);
+}
+
 function handleConquestMoveArmies(fromId: string, toId: string, count: number) {
   roomStore.conquestMoveArmies(props.id, fromId, toId, count);
 }
@@ -357,10 +368,6 @@ function handleConquestAttack(fromId: string, toId: string, diceCount: number) {
 
 function handleConquestEndAttackPhase() {
   roomStore.conquestEndAttackPhase(props.id);
-}
-
-function handleConquestFortify(fromId: string, toId: string, count: number) {
-  roomStore.conquestFortify(props.id, fromId, toId, count);
 }
 
 function handleConquestEndTurn() {
@@ -519,7 +526,7 @@ onMounted(() => {
                 class="turn-timer"
                 :class="{ 'turn-timer-urgent': secondsLeft <= 10 }"
               >
-                ⏱ {{ secondsLeft }}s
+                ⏱ {{ timeLeftLabel }}
               </span>
             </span>
 
@@ -805,10 +812,10 @@ onMounted(() => {
             :last-combat="roomStore.conquestLastCombat"
             hide-player-summary
             @reinforce="handleConquestReinforce"
+            @reset-reinforcements="handleConquestResetReinforcements"
             @move-armies="handleConquestMoveArmies"
             @attack="handleConquestAttack"
             @end-attack-phase="handleConquestEndAttackPhase"
-            @fortify="handleConquestFortify"
             @end-turn="handleConquestEndTurn"
             @trade-cards="handleConquestTradeCards"
             @pass-turn="handleConquestPassTurn"
@@ -887,10 +894,10 @@ onMounted(() => {
           :my-seat-index="myPlayer?.seatIndex ?? null"
           :last-combat="roomStore.conquestLastCombat"
           @reinforce="handleConquestReinforce"
+          @reset-reinforcements="handleConquestResetReinforcements"
           @move-armies="handleConquestMoveArmies"
           @attack="handleConquestAttack"
           @end-attack-phase="handleConquestEndAttackPhase"
-          @fortify="handleConquestFortify"
           @end-turn="handleConquestEndTurn"
           @trade-cards="handleConquestTradeCards"
           @pass-turn="handleConquestPassTurn"

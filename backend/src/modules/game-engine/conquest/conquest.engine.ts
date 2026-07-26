@@ -35,6 +35,11 @@ export interface ConquestState {
   // Whether the current turn's player has captured at least one territory
   // so far this turn -- drives whether they draw a card when the turn ends.
   capturedTerritoryThisTurn: boolean;
+  // Reinforcements placed on each territory so far *this* reinforce phase
+  // (pool placements only, not moveArmies repositioning or card-trade
+  // bonuses) -- lets a misclick be undone via resetReinforcements. Cleared
+  // at the start of every reinforce phase.
+  reinforcementsPlacedThisTurn: Record<string, number>;
 }
 
 // Bonus reinforcement armies for the Nth set traded in (0-indexed),
@@ -102,6 +107,7 @@ function cloneState(state: ConquestState): ConquestState {
     ),
     cardsTradedInCount: state.cardsTradedInCount,
     capturedTerritoryThisTurn: state.capturedTerritoryThisTurn,
+    reinforcementsPlacedThisTurn: { ...state.reinforcementsPlacedThisTurn },
   };
 }
 
@@ -148,30 +154,6 @@ function nextActiveSeat(state: ConquestState, fromSeat: number): number {
   const seats = activeSeats(state);
   const idx = seats.indexOf(fromSeat);
   return seats[(idx + 1) % seats.length];
-}
-
-// Whether `to` is reachable from `from` through a chain of territories all
-// owned by `seatIndex` -- fortify's "owned corridor" rule.
-function connectedThroughOwned(
-  state: ConquestState,
-  seatIndex: number,
-  from: string,
-  to: string,
-): boolean {
-  if (from === to) return false;
-  const visited = new Set([from]);
-  const queue = [from];
-  while (queue.length) {
-    const current = queue.shift()!;
-    for (const neighbor of ADJACENCY[current] ?? []) {
-      if (visited.has(neighbor)) continue;
-      if (state.owner[neighbor] !== seatIndex) continue;
-      if (neighbor === to) return true;
-      visited.add(neighbor);
-      queue.push(neighbor);
-    }
-  }
-  return false;
 }
 
 /**
@@ -236,6 +218,7 @@ export class ConquestEngine implements GameEngine {
       hands,
       cardsTradedInCount: 0,
       capturedTerritoryThisTurn: false,
+      reinforcementsPlacedThisTurn: {},
     };
     state.reinforcementsRemaining = reinforcementsFor(state, state.currentTurnSeat);
 
@@ -281,6 +264,8 @@ export class ConquestEngine implements GameEngine {
 
     state.armies[territoryId] += count;
     state.reinforcementsRemaining -= count;
+    state.reinforcementsPlacedThisTurn[territoryId] =
+      (state.reinforcementsPlacedThisTurn[territoryId] ?? 0) + count;
     if (state.reinforcementsRemaining === 0) {
       state.phase = 'attack';
     }
@@ -289,11 +274,38 @@ export class ConquestEngine implements GameEngine {
   }
 
   /**
+   * Undoes every reinforcement placed on the pool so far this reinforce
+   * phase, returning the armies to reinforcementsRemaining. Only reverts
+   * reinforce()'s pool placements -- not moveArmies repositioning or
+   * card-trade bonuses -- and only while still in the reinforce phase (once
+   * the last army placed auto-advances to attack, there's nothing left to
+   * reset).
+   */
+  resetReinforcements(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as ConquestState);
+    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
+    if (state.phase !== 'reinforce') throw new Error('Not in the reinforce phase.');
+
+    let restored = 0;
+    for (const [territoryId, count] of Object.entries(state.reinforcementsPlacedThisTurn)) {
+      state.armies[territoryId] -= count;
+      restored += count;
+    }
+    state.reinforcementsRemaining += restored;
+    state.reinforcementsPlacedThisTurn = {};
+
+    return state as unknown as Record<string, unknown>;
+  }
+
+  /**
    * Freely repositions armies between two territories the player already
-   * owns, during the reinforce phase only -- no adjacency or connected-path
-   * requirement (unlike fortify, which is limited to one adjacent-ish move
-   * per turn after attacking). At least one army must stay behind so a
-   * territory is never left empty.
+   * owns, during the reinforce or fortify phase -- no adjacency or
+   * connected-path requirement, and it doesn't end the turn or consume the
+   * phase, so it can be called as many times as the player likes. At least
+   * one army must stay behind so a territory is never left empty.
    */
   moveArmies(
     boardStateIn: Record<string, unknown>,
@@ -304,7 +316,9 @@ export class ConquestEngine implements GameEngine {
   ): Record<string, unknown> {
     const state = cloneState(boardStateIn as unknown as ConquestState);
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
-    if (state.phase !== 'reinforce') throw new Error('Not in the reinforce phase.');
+    if (state.phase !== 'reinforce' && state.phase !== 'fortify') {
+      throw new Error('Not in the reinforce or fortify phase.');
+    }
     if (fromId === toId) throw new Error('Pick two different territories.');
     if (state.owner[fromId] !== seatIndex || state.owner[toId] !== seatIndex) {
       throw new Error('You do not own that territory.');
@@ -483,34 +497,7 @@ export class ConquestEngine implements GameEngine {
     };
   }
 
-  /** Moves armies once between two owned territories connected through owned land, ending the turn. */
-  fortify(
-    boardStateIn: Record<string, unknown>,
-    seatIndex: number,
-    fromId: string,
-    toId: string,
-    count: number,
-  ): MoveResult {
-    const state = cloneState(boardStateIn as unknown as ConquestState);
-    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
-    if (state.phase !== 'fortify') throw new Error('Not in the fortify phase.');
-    if (state.owner[fromId] !== seatIndex || state.owner[toId] !== seatIndex) {
-      throw new Error('You must own both territories.');
-    }
-    if (count < 1 || count >= state.armies[fromId]) {
-      throw new Error('Must leave at least one army behind.');
-    }
-    if (!connectedThroughOwned(state, seatIndex, fromId, toId)) {
-      throw new Error('Those territories are not connected through land you own.');
-    }
-
-    state.armies[fromId] -= count;
-    state.armies[toId] += count;
-
-    return this.advanceTurn(state, { fortified: true, fromId, toId, count });
-  }
-
-  /** Ends the turn without fortifying (from the attack or fortify phase). */
+  /** Ends the turn (from the attack or fortify phase) -- fortifying itself no longer ends the turn, see moveArmies. */
   endTurn(boardStateIn: Record<string, unknown>, seatIndex: number): MoveResult {
     const state = cloneState(boardStateIn as unknown as ConquestState);
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
@@ -572,6 +559,7 @@ export class ConquestEngine implements GameEngine {
     state.currentTurnSeat = next;
     state.phase = 'reinforce';
     state.reinforcementsRemaining = reinforcementsFor(state, next);
+    state.reinforcementsPlacedThisTurn = {};
     return {
       boardState: state as unknown as Record<string, unknown>,
       nextTurnSeat: next,

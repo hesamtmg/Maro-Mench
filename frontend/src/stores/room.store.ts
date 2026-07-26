@@ -228,6 +228,7 @@ interface ConquestStateUpdatedEvent {
   bonus?: number;
   territoryBonusId?: string | null;
   movedArmies?: { from: string; to: string; count: number };
+  reinforcementsReset?: boolean;
 }
 
 interface ConquestAttackResultEvent {
@@ -248,6 +249,7 @@ function conquestStateEventMessage(
     return `🃏 ${name} traded in a set for +${payload.bonus} armies${bonusNote}.`;
   }
   if (payload.reinforced) return `🪖 ${name} placed ${payload.count} army/armies on ${payload.reinforced}.`;
+  if (payload.reinforcementsReset) return `↩️ ${name} reset their reinforcements for this turn.`;
   if (payload.movedArmies) {
     const { from, to, count } = payload.movedArmies;
     return `🚚 ${name} moved ${count} army/armies from ${from} to ${to}.`;
@@ -260,11 +262,6 @@ function conquestMoveMessage(
   name: string,
   payload: Record<string, unknown>,
 ): string {
-  if (payload.fortified) {
-    const from = TERRITORY_BY_ID[payload.fromId as string]?.name ?? payload.fromId;
-    const to = TERRITORY_BY_ID[payload.toId as string]?.name ?? payload.toId;
-    return `🚚 ${name} moved ${payload.count} army/armies from ${from} to ${to}.`;
-  }
   if (payload.timedOut) return `⏭️ ${name}'s turn timed out and was ended automatically.`;
   return `⏭️ ${name} ended their turn.`;
 }
@@ -810,6 +807,10 @@ export const useRoomStore = defineStore('room', {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_REINFORCE, { roomId, territoryId, count });
     },
 
+    conquestResetReinforcements(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_RESET_REINFORCEMENTS, { roomId });
+    },
+
     conquestMoveArmies(roomId: string, fromId: string, toId: string, count: number) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_MOVE_ARMIES, { roomId, fromId, toId, count });
     },
@@ -820,10 +821,6 @@ export const useRoomStore = defineStore('room', {
 
     conquestEndAttackPhase(roomId: string) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_END_ATTACK_PHASE, { roomId });
-    },
-
-    conquestFortify(roomId: string, fromId: string, toId: string, count: number) {
-      getSocket().emit(WS_EVENTS_IN.CONQUEST_FORTIFY, { roomId, fromId, toId, count });
     },
 
     conquestEndTurn(roomId: string) {

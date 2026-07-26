@@ -39,10 +39,10 @@ export const WS_EVENTS_IN = {
   // turn-ending fortify/endTurn events -- same shared-contract mismatch as
   // Monopoly's build-house vs. its actual dice-roll move.
   CONQUEST_REINFORCE: 'conquest_reinforce', // { roomId, territoryId, count }
-  CONQUEST_MOVE_ARMIES: 'conquest_move_armies', // { roomId, fromId, toId, count } -- free repositioning during reinforce, no adjacency required
+  CONQUEST_RESET_REINFORCEMENTS: 'conquest_reset_reinforcements', // { roomId } -- undo this turn's reinforce-phase placements
+  CONQUEST_MOVE_ARMIES: 'conquest_move_armies', // { roomId, fromId, toId, count } -- free repositioning during reinforce or fortify, no adjacency required
   CONQUEST_ATTACK: 'conquest_attack', // { roomId, fromId, toId, diceCount }
   CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase', // { roomId }
-  CONQUEST_FORTIFY: 'conquest_fortify', // { roomId, fromId, toId, count }
   CONQUEST_END_TURN: 'conquest_end_turn', // { roomId }
   CONQUEST_TRADE_CARDS: 'conquest_trade_cards', // { roomId, cardIds: string[] }
   CONQUEST_PASS_TURN: 'conquest_pass_turn', // { roomId } -- voluntary version of the timeout scheduler's force-end-turn

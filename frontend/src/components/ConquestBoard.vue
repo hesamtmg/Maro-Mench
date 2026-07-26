@@ -154,6 +154,11 @@ const mustTradeIn = computed(() => myHand.value.length >= 5);
 
 const selectedCardIds = ref<string[]>([]);
 
+// Collapsed by default so the trophies panel doesn't sit over the map
+// blocking territories -- the player opens it deliberately to check
+// bonuses/schedules.
+const trophiesOpen = ref(false);
+
 function toggleCard(cardId: string) {
   const i = selectedCardIds.value.indexOf(cardId);
   if (i !== -1) {
@@ -451,49 +456,59 @@ function nodeClasses(territoryId: string) {
       </svg>
 
       <div v-if="state" class="cb-trophies-float">
-        <h4 class="panel-title">🏆 Trophies</h4>
+        <button
+          type="button"
+          class="cb-trophies-toggle"
+          :aria-expanded="trophiesOpen"
+          @click="trophiesOpen = !trophiesOpen"
+        >
+          <span>🏆 Trophies</span>
+          <span class="cb-trophies-chevron">{{ trophiesOpen ? "▾" : "▸" }}</span>
+        </button>
 
-        <p class="cb-trophies-subtitle">Continents -- own every territory for the bonus</p>
-        <table class="cb-table">
-          <thead>
-            <tr>
-              <th>Continent</th>
-              <th>Terr.</th>
-              <th>Bonus</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in CONTINENTS" :key="c.id">
-              <td class="cb-table-continent">
-                <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
-                {{ c.name }}
-              </td>
-              <td>{{ territoryCountForContinent(c.id) }}</td>
-              <td>+{{ c.bonus }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="trophiesOpen" class="cb-trophies-body">
+          <p class="cb-trophies-subtitle">Continents -- own every territory for the bonus</p>
+          <table class="cb-table">
+            <thead>
+              <tr>
+                <th>Continent</th>
+                <th>Terr.</th>
+                <th>Bonus</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in CONTINENTS" :key="c.id">
+                <td class="cb-table-continent">
+                  <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
+                  {{ c.name }}
+                </td>
+                <td>{{ territoryCountForContinent(c.id) }}</td>
+                <td>+{{ c.bonus }}</td>
+              </tr>
+            </tbody>
+          </table>
 
-        <p class="cb-trophies-subtitle">Card sets -- trade in 3 for a growing bonus</p>
-        <table class="cb-table">
-          <thead>
-            <tr>
-              <th>Set #</th>
-              <th>Bonus</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="n in 7"
-              :key="n"
-              :class="{ 'cb-table-next': state?.cardsTradedInCount === n - 1 }"
-            >
-              <td>{{ n }}{{ ordinalSuffix(n) }}</td>
-              <td>+{{ previewTradeBonus(n - 1) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="text-muted cb-trophies-note">Every set after the 6th is worth +5 more than the last.</p>
+          <p class="cb-trophies-subtitle">Card sets -- trade in 3 for a growing bonus</p>
+          <table class="cb-table">
+            <thead>
+              <tr>
+                <th>Set #</th>
+                <th>Bonus</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="n in 7"
+                :key="n"
+                :class="{ 'cb-table-next': state?.cardsTradedInCount === n - 1 }"
+              >
+                <td>{{ n }}{{ ordinalSuffix(n) }}</td>
+                <td>+{{ previewTradeBonus(n - 1) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="text-muted cb-trophies-note">Every set after the 6th is worth +5 more than the last.</p>
+        </div>
       </div>
       </div>
 
@@ -700,16 +715,47 @@ function nodeClasses(territoryId: string) {
   position: absolute;
   left: 0.6rem;
   bottom: 0.6rem;
-  width: 17rem;
+  max-width: 17rem;
   max-height: 88%;
-  overflow-y: auto;
-  padding: 0.6rem 0.7rem;
-  background: rgba(10, 14, 26, 0.9);
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 14, 26, 0.85);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   backdrop-filter: blur(2px);
   font-size: 0.76rem;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transition: background 0.15s ease;
+}
+
+.cb-trophies-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.4rem 0.65rem;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cb-trophies-toggle:hover {
+  color: #ffd93d;
+}
+
+.cb-trophies-chevron {
+  color: var(--color-text-muted);
+}
+
+.cb-trophies-body {
+  padding: 0 0.7rem 0.6rem;
+  overflow-y: auto;
+  width: 17rem;
+  max-width: 100%;
 }
 
 .cb-landmass {
@@ -1158,10 +1204,17 @@ function nodeClasses(territoryId: string) {
   }
 
   .cb-trophies-float {
-    width: 12rem;
     max-height: 78%;
     font-size: 0.6rem;
-    padding: 0.4rem 0.45rem;
+  }
+
+  .cb-trophies-body {
+    width: 12rem;
+    padding: 0 0.45rem 0.4rem;
+  }
+
+  .cb-trophies-toggle {
+    padding: 0.35rem 0.45rem;
   }
 
   .cb-continent-badge-text {

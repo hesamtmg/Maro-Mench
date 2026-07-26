@@ -300,25 +300,41 @@ function nodeClasses(territoryId: string) {
           :class="{ 'cb-edge-strait': nodeById[edge.a].continentId !== nodeById[edge.b].continentId }"
         />
 
+        <!-- Territory markers styled as little standing toy-soldier
+             figures (original silhouette design -- head, torso, legs,
+             shouldered rifle -- not traced from any commercial game's
+             miniature sculpts) instead of flat circles, echoing how a
+             physical board game marks armies with standee pieces. -->
         <g
           v-for="node in nodePositions"
           :key="node.id"
           :class="nodeClasses(node.id)"
           class="cb-node"
+          :transform="`translate(${node.cx}, ${node.cy})`"
           @click="onTerritoryClick(node.id)"
         >
           <title>{{ node.name }}</title>
-          <circle :cx="node.cx + 0.8" :cy="node.cy + 1.2" r="9" class="cb-node-shadow" />
+          <circle cx="0" cy="0" r="8" class="cb-node-plinth" />
+          <ellipse cx="0" cy="5.4" rx="3.6" ry="1.3" class="cb-soldier-shadow" />
+          <g class="cb-soldier" :fill="playerColor(ownerOf(node.id))">
+            <path class="cb-soldier-leg" d="M-1.9 5.2 L-0.9 -1 L-0.1 -1 L-0.6 5.2 Z" />
+            <path class="cb-soldier-leg" d="M1.9 5.2 L0.9 -1 L0.1 -1 L0.6 5.2 Z" />
+            <path
+              class="cb-soldier-body"
+              d="M-2.3 -1 C-2.6 -4.6 -1.6 -6 0 -6 C1.6 -6 2.6 -4.6 2.3 -1 Z"
+            />
+            <line class="cb-soldier-rifle" x1="-3.4" y1="-7.2" x2="2.1" y2="-0.6" />
+            <circle class="cb-soldier-head" cx="0" cy="-7" r="1.7" />
+          </g>
           <circle
-            :cx="node.cx"
-            :cy="node.cy"
-            r="9"
-            :fill="playerColor(ownerOf(node.id))"
-            class="cb-node-circle"
+            cx="4.2"
+            cy="3.4"
+            r="3.6"
+            class="cb-node-armybadge"
+            :style="{ '--player-color': playerColor(ownerOf(node.id)) }"
           />
-          <ellipse :cx="node.cx - 3" :cy="node.cy - 3.3" rx="4" ry="2.5" class="cb-node-gloss" />
-          <text :x="node.cx" :y="node.cy + 3" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
-          <text :x="node.cx" :y="node.cy - 12" class="cb-node-label">{{ node.name }}</text>
+          <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
+          <text x="0" y="-13" class="cb-node-label">{{ node.name }}</text>
         </g>
       </svg>
 
@@ -507,50 +523,63 @@ function nodeClasses(territoryId: string) {
   cursor: pointer;
 }
 
-.cb-node-shadow {
-  fill: rgba(0, 0, 0, 0.45);
+.cb-node-plinth {
+  fill: rgba(0, 0, 0, 0.28);
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 0.75;
+  transition:
+    stroke 0.15s ease,
+    stroke-width 0.15s ease;
 }
 
-.cb-node-circle {
-  stroke: rgba(0, 0, 0, 0.55);
-  stroke-width: 1;
-  transition: r 0.15s ease;
+.cb-soldier-shadow {
+  fill: rgba(0, 0, 0, 0.4);
 }
 
-.cb-node-gloss {
-  fill: rgba(255, 255, 255, 0.4);
-  pointer-events: none;
+.cb-soldier path,
+.cb-soldier circle {
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 0.4;
 }
 
-.cb-node:hover .cb-node-circle {
+.cb-soldier-rifle {
+  stroke: #3a3a3a;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-node:hover .cb-node-plinth {
   stroke: rgba(255, 255, 255, 0.85);
   stroke-width: 1.5;
 }
 
-.cb-node-selected .cb-node-circle {
+.cb-node-selected .cb-node-plinth {
   stroke: #ffd93d;
   stroke-width: 2.5;
 }
 
-.cb-node-target .cb-node-circle {
+.cb-node-target .cb-node-plinth {
   stroke: #ff6b6b;
   stroke-width: 2.5;
 }
 
-.cb-node-attackable .cb-node-circle {
+.cb-node-attackable .cb-node-plinth {
   stroke-dasharray: 2 1.5;
   stroke: #ffd93d;
   stroke-width: 1.75;
 }
 
+.cb-node-armybadge {
+  fill: #1a2033;
+  stroke: var(--player-color, #999);
+  stroke-width: 1;
+}
+
 .cb-node-armies {
-  font-size: 8px;
+  font-size: 6.5px;
   font-weight: 800;
   fill: #fff;
   text-anchor: middle;
-  paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.7);
-  stroke-width: 1.5;
   pointer-events: none;
 }
 

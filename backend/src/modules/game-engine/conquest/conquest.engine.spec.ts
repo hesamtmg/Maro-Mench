@@ -252,10 +252,28 @@ describe('ConquestEngine', () => {
       );
     });
 
-    it('rejects moving outside the reinforce phase', () => {
+    it('also works during the fortify phase, with no adjacency requirement', () => {
+      const state = baseState(
+        {},
+        { icemark: 3, stormatoll: 1 },
+        { phase: 'fortify' },
+      );
+      const result = engine.moveArmies(
+        asRecord(state),
+        0,
+        'icemark',
+        'stormatoll',
+        1,
+      ) as unknown as ConquestState;
+      expect(result.armies.icemark).toBe(2);
+      expect(result.armies.stormatoll).toBe(2);
+      expect(result.phase).toBe('fortify');
+    });
+
+    it('rejects moving outside the reinforce/fortify phases', () => {
       const state = baseState({}, { icemark: 3 }, { phase: 'attack' });
       expect(() => engine.moveArmies(asRecord(state), 0, 'icemark', 'stormatoll', 1)).toThrow(
-        'Not in the reinforce phase.',
+        'Not in the reinforce or fortify phase.',
       );
     });
 
@@ -369,55 +387,44 @@ describe('ConquestEngine', () => {
     });
   });
 
-  describe('endAttackPhase / fortify / endTurn', () => {
+  describe('endAttackPhase / fortify (moveArmies) / endTurn', () => {
     it('moves from attack to fortify', () => {
       const s = baseState();
       const result = engine.endAttackPhase(asRecord(s), 0) as unknown as ConquestState;
       expect(result.phase).toBe('fortify');
     });
 
-    it('fortifies between two owned territories connected through owned land', () => {
-      const s = baseState(
-        {},
-        { icemark: 5, glacier_reach: 2 },
-        { phase: 'fortify' },
-      );
-      const move = engine.fortify(asRecord(s), 0, 'icemark', 'glacier_reach', 3);
-      const result = move.boardState as unknown as ConquestState;
-      expect(result.armies.icemark).toBe(2);
-      expect(result.armies.glacier_reach).toBe(5);
-      // Fortifying ends the turn.
-      expect(move.nextTurnSeat).toBe(1);
-      expect(result.currentTurnSeat).toBe(1);
-      expect(result.phase).toBe('reinforce');
-    });
-
-    it('allows fortifying through a multi-hop owned corridor', () => {
-      // icemark -> tundrafall -> whitepeak -> snowvale, all owned by seat 0.
-      const s = baseState({}, { icemark: 5, snowvale: 1 }, { phase: 'fortify' });
-      const move = engine.fortify(asRecord(s), 0, 'icemark', 'snowvale', 2);
-      const result = move.boardState as unknown as ConquestState;
-      expect(result.armies.snowvale).toBe(3);
-    });
-
-    it('rejects fortifying when both ends are owned but no owned path connects them', () => {
-      // pearl_isle is seat 0's, but its only neighbor (its sole link back
-      // to the mainland) belongs to seat 1, isolating it.
+    it('fortifying (via moveArmies) does not end the turn, and can repeat', () => {
+      // pearl_isle is seat 0's, but its only neighbor (its sole link back to
+      // the mainland) belongs to seat 1 -- fortify has no adjacency/corridor
+      // requirement any more, so this still works.
       const s = baseState(
         { reefhaven: 1, whitepeak: 1 },
-        { icemark: 5 },
+        { icemark: 5, pearl_isle: 1 },
         { phase: 'fortify' },
       );
-      expect(() =>
-        engine.fortify(asRecord(s), 0, 'icemark', 'pearl_isle', 1),
-      ).toThrow('Those territories are not connected through land you own.');
-    });
+      const afterFirst = engine.moveArmies(
+        asRecord(s),
+        0,
+        'icemark',
+        'pearl_isle',
+        3,
+      ) as unknown as ConquestState;
+      expect(afterFirst.armies.icemark).toBe(2);
+      expect(afterFirst.armies.pearl_isle).toBe(4);
+      expect(afterFirst.phase).toBe('fortify');
+      expect(afterFirst.currentTurnSeat).toBe(0);
 
-    it('rejects fortifying more armies than available (must leave 1 behind)', () => {
-      const s = baseState({}, { icemark: 3, glacier_reach: 1 }, { phase: 'fortify' });
-      expect(() =>
-        engine.fortify(asRecord(s), 0, 'icemark', 'glacier_reach', 3),
-      ).toThrow('Must leave at least one army behind.');
+      const afterSecond = engine.moveArmies(
+        asRecord(afterFirst),
+        0,
+        'pearl_isle',
+        'icemark',
+        1,
+      ) as unknown as ConquestState;
+      expect(afterSecond.armies.pearl_isle).toBe(3);
+      expect(afterSecond.armies.icemark).toBe(3);
+      expect(afterSecond.phase).toBe('fortify');
     });
 
     it('endTurn advances to the next seat and resets to the reinforce phase', () => {

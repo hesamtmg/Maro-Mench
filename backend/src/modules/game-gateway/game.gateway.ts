@@ -1085,9 +1085,9 @@ export class GameGateway
 
   /**
    * Conquest-only: freely repositions armies between two owned territories
-   * during the reinforce phase (no adjacency required). Doesn't consume the
-   * turn or touch reinforcementsRemaining -- a player can do this as many
-   * times as they like before placing/finishing reinforcements.
+   * during the reinforce or fortify phase (no adjacency required). Doesn't
+   * end the turn or touch reinforcementsRemaining -- a player can do this
+   * as many times as they like in either phase.
    */
   @SubscribeMessage(WS_EVENTS_IN.CONQUEST_MOVE_ARMIES)
   async onConquestMoveArmies(
@@ -1239,38 +1239,7 @@ export class GameGateway
     }
   }
 
-  /** Conquest-only: moves armies once between owned, connected territories, ending the turn. */
-  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_FORTIFY)
-  async onConquestFortify(
-    @ConnectedSocket() socket: AuthenticatedSocket,
-    @MessageBody()
-    payload: { roomId: string; fromId: string; toId: string; count: number },
-  ) {
-    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
-    const player = room.players.find((p) => p.userId === socket.data.userId);
-    if (this.rejectIfPaused(socket, room.id)) return;
-    const gameState = await this.gameStateService.getGameState(room.id);
-
-    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
-      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
-      return;
-    }
-
-    try {
-      const moveResult = this.conquestEngine.fortify(
-        gameState.boardState,
-        player.seatIndex,
-        payload.fromId,
-        payload.toId,
-        payload.count,
-      );
-      await this.applyAndBroadcastMove(room, gameState, player.seatIndex, 0, moveResult);
-    } catch (err) {
-      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
-    }
-  }
-
-  /** Conquest-only: ends the turn without fortifying (from the attack or fortify phase). */
+  /** Conquest-only: ends the turn (from the attack or fortify phase). */
   @SubscribeMessage(WS_EVENTS_IN.CONQUEST_END_TURN)
   async onConquestEndTurn(
     @ConnectedSocket() socket: AuthenticatedSocket,

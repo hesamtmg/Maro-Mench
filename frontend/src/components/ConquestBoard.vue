@@ -13,6 +13,7 @@ import {
 import { CONTINENT_PATHS } from "./conquest/continent-paths";
 import type { RoomPlayer } from "../types";
 import type { ConquestCombatResult } from "../stores/room.store";
+import { playHooray } from "../lib/game-sounds";
 
 const props = defineProps<{
   boardState: Record<string, unknown>;
@@ -28,7 +29,6 @@ const emit = defineEmits<{
   "move-armies": [fromId: string, toId: string, count: number];
   attack: [fromId: string, toId: string, diceCount: number];
   "end-attack-phase": [];
-  fortify: [fromId: string, toId: string, count: number];
   "end-turn": [];
   "trade-cards": [cardIds: string[]];
   "pass-turn": [];
@@ -82,12 +82,13 @@ const VIEW_H = 620;
 
 // --- Zoom / pan ---
 // The map defaults to showing the whole world, which makes labels and
-// army counts tiny on anything but a large screen. Scroll/pinch to zoom
-// (toward the cursor/pinch center) and drag to pan around; +/-/reset
-// buttons cover touch devices with no wheel. This only changes the SVG's
-// viewBox -- territory click targets are unaffected, since SVG hit
-// -testing works in the element's own coordinate space regardless of how
-// the viewBox is currently framed.
+// army counts tiny on anything but a large screen. Deliberately no
+// scroll-wheel zoom -- it fights the page's own scrolling and surprises
+// people who just meant to scroll past the map. Zoom is drag/gesture only:
+// pinch (toward the pinch midpoint) or the +/-/reset buttons, and drag to
+// pan around. This only changes the SVG's viewBox -- territory click
+// targets are unaffected, since SVG hit-testing works in the element's own
+// coordinate space regardless of how the viewBox is currently framed.
 const svgRef = ref<SVGSVGElement | null>(null);
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
@@ -141,12 +142,6 @@ function zoomTo(newZoomRaw: number, anchor?: { x: number; y: number }) {
   if (newZoom === zoom.value) return;
   const point = anchor ?? { x: viewX.value + viewW.value / 2, y: viewY.value + viewH.value / 2 };
   applyZoomAnchored(newZoom, point);
-}
-
-function onMapWheel(evt: WheelEvent) {
-  evt.preventDefault();
-  const point = svgPointFromClient(evt.clientX, evt.clientY);
-  zoomTo(zoom.value * (evt.deltaY < 0 ? 1.25 : 0.8), point ?? undefined);
 }
 
 function zoomInButton() {
@@ -323,6 +318,47 @@ const myContinentBonus = computed(() => {
   };
 });
 
+// Seat that fully owns each continent (for bolding its badge on the map),
+// or null if the continent is split between two or more seats.
+const continentFullOwners = computed(() => {
+  const s = state.value;
+  const map: Record<string, number | null> = {};
+  for (const c of CONTINENTS) {
+    if (!s) {
+      map[c.id] = null;
+      continue;
+    }
+    const members = TERRITORIES.filter((t) => t.continentId === c.id);
+    const firstOwner = s.owner[members[0].id];
+    map[c.id] =
+      firstOwner != null && members.every((t) => s.owner[t.id] === firstOwner)
+        ? firstOwner
+        : null;
+  }
+  return map;
+});
+
+// Celebrate the moment *I* complete a continent (not when the opponent
+// does, and not a re-trigger just from a re-render) with a one-shot sound.
+// Tracked in a plain Set (not reactive state) since it's just local
+// bookkeeping for "have I already played this one", re-armed if the
+// continent is lost so recapturing it celebrates again.
+const celebratedContinentIds = new Set<string>();
+watch(
+  () => myContinentBonus.value.continents.map((c) => c.id),
+  (ownedIds) => {
+    for (const id of ownedIds) {
+      if (!celebratedContinentIds.has(id)) {
+        celebratedContinentIds.add(id);
+        playHooray();
+      }
+    }
+    for (const id of [...celebratedContinentIds]) {
+      if (!ownedIds.includes(id)) celebratedContinentIds.delete(id);
+    }
+  }
+);
+
 // --- Cards ---
 
 const myHand = computed<CardDef[]>(() => {
@@ -435,7 +471,6 @@ const continentLabelPositions = computed(() =>
 const selectedFrom = ref<string | null>(null);
 const selectedTo = ref<string | null>(null);
 const attackDiceCount = ref(1);
-const fortifyCount = ref(1);
 
 function clearSelection() {
   selectedFrom.value = null;
@@ -459,19 +494,30 @@ watch(maxAttackDice, (max) => {
   if (attackDiceCount.value > max) attackDiceCount.value = max;
 });
 
-const maxFortifyCount = computed(() => {
-  if (!selectedFrom.value) return 1;
-  return Math.max(1, armiesOn(selectedFrom.value) - 1);
-});
-watch(maxFortifyCount, (max) => {
-  if (fortifyCount.value > max) fortifyCount.value = max;
+// Lets a player keep attacking the same border with one click instead of
+// re-picking both territories after every roll. Purely a convenience --
+// the backend re-validates ownership/adjacency/army-counts regardless, so
+// a stale lastCombat (e.g. from the opponent's last turn) just fails
+// harmlessly if clicked instead of doing anything wrong.
+const canContinueAttack = computed(() => {
+  const lc = props.lastCombat;
+  if (!lc || !isMyTurn.value || state.value?.phase !== "attack") return false;
+  if (ownerOf(lc.fromId) !== props.mySeatIndex) return false;
+  if (ownerOf(lc.toId) === props.mySeatIndex) return false;
+  return armiesOn(lc.fromId) >= 2;
 });
 
-// --- Reinforce-phase free army movement ---
-// Unlike fortify (once per turn, after attacking), this lets a player
-// reposition armies between any two territories they own -- no adjacency
-// or connected-path requirement -- as many times as they like while still
-// in the reinforce phase.
+function continueAttacking() {
+  const lc = props.lastCombat;
+  if (!lc || !canContinueAttack.value) return;
+  const dice = Math.max(1, Math.min(3, armiesOn(lc.fromId) - 1));
+  emit("attack", lc.fromId, lc.toId, dice);
+}
+
+// --- Free army movement (reinforce and fortify phases) ---
+// Lets a player reposition armies between any two territories they own --
+// no adjacency or connected-path requirement -- as many times as they
+// like, in either phase, without ending the turn or the phase.
 const moveFromId = ref<string | null>(null);
 const moveToId = ref<string | null>(null);
 const moveCount = ref(1);
@@ -548,22 +594,6 @@ function onTerritoryClick(territoryId: string) {
     if (selectedFrom.value && attackableTargets.value.has(territoryId)) {
       selectedTo.value = territoryId;
     }
-    return;
-  }
-
-  if (s.phase === "fortify") {
-    if (!selectedFrom.value) {
-      if (mine && armiesOn(territoryId) >= 2) selectedFrom.value = territoryId;
-      return;
-    }
-    if (territoryId === selectedFrom.value) {
-      selectedFrom.value = null;
-      return;
-    }
-    if (mine) {
-      selectedTo.value = territoryId;
-      fortifyCount.value = 1;
-    }
   }
 }
 
@@ -571,12 +601,6 @@ function submitAttack() {
   if (!selectedFrom.value || !selectedTo.value) return;
   emit("attack", selectedFrom.value, selectedTo.value, attackDiceCount.value);
   selectedTo.value = null;
-}
-
-function submitFortify() {
-  if (!selectedFrom.value || !selectedTo.value) return;
-  emit("fortify", selectedFrom.value, selectedTo.value, fortifyCount.value);
-  clearSelection();
 }
 
 function endAttackPhase() {
@@ -632,7 +656,6 @@ function nodeClasses(territoryId: string) {
         :class="{ 'cb-map-panning': isPanning }"
         :viewBox="viewBoxStr"
         preserveAspectRatio="xMidYMid meet"
-        @wheel="onMapWheel"
         @pointerdown="onMapPointerDown"
         @pointermove="onMapPointerMove"
         @pointerup="onMapPointerUp"
@@ -706,8 +729,16 @@ function nodeClasses(territoryId: string) {
           :key="`badge-${c.id}`"
           :transform="`translate(${c.x}, ${c.y})`"
           class="cb-continent-badge"
+          :class="{ 'cb-continent-badge-owned': continentFullOwners[c.id] != null }"
         >
-          <rect x="-15" y="-8" width="30" height="16" rx="4" :fill="CONTINENT_COLORS[c.id]" />
+          <rect
+            x="-15"
+            y="-8"
+            width="30"
+            height="16"
+            rx="4"
+            :fill="continentFullOwners[c.id] != null ? playerColor(continentFullOwners[c.id]) : CONTINENT_COLORS[c.id]"
+          />
           <text x="0" y="4" class="cb-continent-badge-text">+{{ c.bonus }}</text>
         </g>
       </svg>
@@ -893,26 +924,49 @@ function nodeClasses(territoryId: string) {
         </template>
 
         <template v-else-if="state?.phase === 'fortify'">
-          <p><strong>Fortify:</strong> move armies once between territories you own, then your turn ends.</p>
-          <div v-if="selectedFrom && selectedTo" class="cb-attack-picker">
-            <p>
-              {{ TERRITORY_BY_ID[selectedFrom]?.name }} &rarr;
-              {{ TERRITORY_BY_ID[selectedTo]?.name }}
+          <p><strong>Fortify:</strong> reposition your armies as many times as you like, then end your turn.</p>
+
+          <div class="cb-move-armies">
+            <p class="cb-move-armies-title">
+              <strong>Move armies</strong>
+              <span class="text-muted"> -- reposition troops anywhere on the map</span>
             </p>
-            <div class="row">
-              <label class="cb-inline-label">
-                Armies
-                <input
-                  v-model.number="fortifyCount"
-                  type="number"
-                  min="1"
-                  :max="maxFortifyCount"
-                />
-              </label>
-              <button class="btn btn-primary" @click="submitFortify">Fortify &amp; end turn</button>
+            <div class="row cb-move-armies-row">
+              <select v-model="moveFromId" class="cb-move-select">
+                <option :value="null" disabled>From territory</option>
+                <option v-for="t in myOwnedTerritories" :key="t.id" :value="t.id">
+                  {{ t.name }} ({{ armiesOn(t.id) }})
+                </option>
+              </select>
+              <select v-model="moveToId" class="cb-move-select">
+                <option :value="null" disabled>To territory</option>
+                <option
+                  v-for="t in myOwnedTerritories"
+                  :key="t.id"
+                  :value="t.id"
+                  :disabled="t.id === moveFromId"
+                >
+                  {{ t.name }} ({{ armiesOn(t.id) }})
+                </option>
+              </select>
+              <input
+                v-model.number="moveCount"
+                type="number"
+                min="1"
+                :max="moveFromMaxCount"
+                class="cb-move-count"
+              />
+              <button
+                class="btn btn-secondary"
+                :disabled="!canMoveArmies"
+                @click="submitMoveArmies"
+              >
+                Move
+              </button>
             </div>
           </div>
-          <button class="btn btn-secondary" @click="endTurn">End turn without fortifying</button>
+
+          <button class="btn btn-primary cb-end-turn-btn" @click="endTurn">End turn</button>
         </template>
 
         <button class="btn btn-secondary cb-pass-btn" title="Auto-place any leftover reinforcements and hand off immediately" @click="passTurn">
@@ -965,6 +1019,13 @@ function nodeClasses(territoryId: string) {
             Attacker lost {{ lastCombat.attackerLosses }}, defender lost {{ lastCombat.defenderLosses }}.
             <template v-if="lastCombat.captured">Territory captured!</template>
           </p>
+          <button
+            v-if="canContinueAttack"
+            class="btn btn-primary cb-continue-attack-btn"
+            @click="continueAttacking"
+          >
+            ⚔️ Continue attacking
+          </button>
         </template>
       </div>
 
@@ -1257,6 +1318,18 @@ function nodeClasses(territoryId: string) {
   stroke-width: 1.5;
 }
 
+/* A continent fully owned by one seat gets a gold outline and a bigger,
+   bolder badge so it stands out as "claimed" on the map. */
+.cb-continent-badge-owned rect {
+  stroke: #ffd54a;
+  stroke-width: 2;
+}
+
+.cb-continent-badge-owned .cb-continent-badge-text {
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .cb-status-bar {
   display: flex;
   align-items: center;
@@ -1428,6 +1501,16 @@ function nodeClasses(territoryId: string) {
 .cb-pass-btn {
   width: 100%;
   margin-top: 0.6rem;
+}
+
+.cb-end-turn-btn {
+  width: 100%;
+  margin-top: 0.6rem;
+}
+
+.cb-continue-attack-btn {
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
 .cb-move-armies {
@@ -1655,6 +1738,10 @@ function nodeClasses(territoryId: string) {
 
   .cb-continent-badge-text {
     font-size: 8px;
+  }
+
+  .cb-continent-badge-owned .cb-continent-badge-text {
+    font-size: 9.5px;
   }
 }
 </style>

@@ -359,10 +359,6 @@ function handleConquestEndAttackPhase() {
   roomStore.conquestEndAttackPhase(props.id);
 }
 
-function handleConquestFortify(fromId: string, toId: string, count: number) {
-  roomStore.conquestFortify(props.id, fromId, toId, count);
-}
-
 function handleConquestEndTurn() {
   roomStore.conquestEndTurn(props.id);
 }
@@ -808,7 +804,6 @@ onMounted(() => {
             @move-armies="handleConquestMoveArmies"
             @attack="handleConquestAttack"
             @end-attack-phase="handleConquestEndAttackPhase"
-            @fortify="handleConquestFortify"
             @end-turn="handleConquestEndTurn"
             @trade-cards="handleConquestTradeCards"
             @pass-turn="handleConquestPassTurn"
@@ -890,7 +885,6 @@ onMounted(() => {
           @move-armies="handleConquestMoveArmies"
           @attack="handleConquestAttack"
           @end-attack-phase="handleConquestEndAttackPhase"
-          @fortify="handleConquestFortify"
           @end-turn="handleConquestEndTurn"
           @trade-cards="handleConquestTradeCards"
           @pass-turn="handleConquestPassTurn"

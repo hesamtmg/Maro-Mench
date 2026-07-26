@@ -33,7 +33,6 @@ export const WS_EVENTS_IN = {
   CONQUEST_MOVE_ARMIES: 'conquest_move_armies',
   CONQUEST_ATTACK: 'conquest_attack',
   CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase',
-  CONQUEST_FORTIFY: 'conquest_fortify',
   CONQUEST_END_TURN: 'conquest_end_turn',
   CONQUEST_TRADE_CARDS: 'conquest_trade_cards',
   CONQUEST_PASS_TURN: 'conquest_pass_turn',

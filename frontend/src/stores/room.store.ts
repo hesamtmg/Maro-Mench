@@ -260,11 +260,6 @@ function conquestMoveMessage(
   name: string,
   payload: Record<string, unknown>,
 ): string {
-  if (payload.fortified) {
-    const from = TERRITORY_BY_ID[payload.fromId as string]?.name ?? payload.fromId;
-    const to = TERRITORY_BY_ID[payload.toId as string]?.name ?? payload.toId;
-    return `🚚 ${name} moved ${payload.count} army/armies from ${from} to ${to}.`;
-  }
   if (payload.timedOut) return `⏭️ ${name}'s turn timed out and was ended automatically.`;
   return `⏭️ ${name} ended their turn.`;
 }
@@ -820,10 +815,6 @@ export const useRoomStore = defineStore('room', {
 
     conquestEndAttackPhase(roomId: string) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_END_ATTACK_PHASE, { roomId });
-    },
-
-    conquestFortify(roomId: string, fromId: string, toId: string, count: number) {
-      getSocket().emit(WS_EVENTS_IN.CONQUEST_FORTIFY, { roomId, fromId, toId, count });
     },
 
     conquestEndTurn(roomId: string) {

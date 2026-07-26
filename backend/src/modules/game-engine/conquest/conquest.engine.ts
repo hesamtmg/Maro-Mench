@@ -150,30 +150,6 @@ function nextActiveSeat(state: ConquestState, fromSeat: number): number {
   return seats[(idx + 1) % seats.length];
 }
 
-// Whether `to` is reachable from `from` through a chain of territories all
-// owned by `seatIndex` -- fortify's "owned corridor" rule.
-function connectedThroughOwned(
-  state: ConquestState,
-  seatIndex: number,
-  from: string,
-  to: string,
-): boolean {
-  if (from === to) return false;
-  const visited = new Set([from]);
-  const queue = [from];
-  while (queue.length) {
-    const current = queue.shift()!;
-    for (const neighbor of ADJACENCY[current] ?? []) {
-      if (visited.has(neighbor)) continue;
-      if (state.owner[neighbor] !== seatIndex) continue;
-      if (neighbor === to) return true;
-      visited.add(neighbor);
-      queue.push(neighbor);
-    }
-  }
-  return false;
-}
-
 /**
  * Conquest is a territory-conquest game (reinforce / attack / fortify)
  * with no turn-starting dice roll or discrete token move -- it doesn't fit
@@ -290,10 +266,10 @@ export class ConquestEngine implements GameEngine {
 
   /**
    * Freely repositions armies between two territories the player already
-   * owns, during the reinforce phase only -- no adjacency or connected-path
-   * requirement (unlike fortify, which is limited to one adjacent-ish move
-   * per turn after attacking). At least one army must stay behind so a
-   * territory is never left empty.
+   * owns, during the reinforce or fortify phase -- no adjacency or
+   * connected-path requirement, and it doesn't end the turn or consume the
+   * phase, so it can be called as many times as the player likes. At least
+   * one army must stay behind so a territory is never left empty.
    */
   moveArmies(
     boardStateIn: Record<string, unknown>,
@@ -304,7 +280,9 @@ export class ConquestEngine implements GameEngine {
   ): Record<string, unknown> {
     const state = cloneState(boardStateIn as unknown as ConquestState);
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
-    if (state.phase !== 'reinforce') throw new Error('Not in the reinforce phase.');
+    if (state.phase !== 'reinforce' && state.phase !== 'fortify') {
+      throw new Error('Not in the reinforce or fortify phase.');
+    }
     if (fromId === toId) throw new Error('Pick two different territories.');
     if (state.owner[fromId] !== seatIndex || state.owner[toId] !== seatIndex) {
       throw new Error('You do not own that territory.');
@@ -483,34 +461,7 @@ export class ConquestEngine implements GameEngine {
     };
   }
 
-  /** Moves armies once between two owned territories connected through owned land, ending the turn. */
-  fortify(
-    boardStateIn: Record<string, unknown>,
-    seatIndex: number,
-    fromId: string,
-    toId: string,
-    count: number,
-  ): MoveResult {
-    const state = cloneState(boardStateIn as unknown as ConquestState);
-    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
-    if (state.phase !== 'fortify') throw new Error('Not in the fortify phase.');
-    if (state.owner[fromId] !== seatIndex || state.owner[toId] !== seatIndex) {
-      throw new Error('You must own both territories.');
-    }
-    if (count < 1 || count >= state.armies[fromId]) {
-      throw new Error('Must leave at least one army behind.');
-    }
-    if (!connectedThroughOwned(state, seatIndex, fromId, toId)) {
-      throw new Error('Those territories are not connected through land you own.');
-    }
-
-    state.armies[fromId] -= count;
-    state.armies[toId] += count;
-
-    return this.advanceTurn(state, { fortified: true, fromId, toId, count });
-  }
-
-  /** Ends the turn without fortifying (from the attack or fortify phase). */
+  /** Ends the turn (from the attack or fortify phase) -- fortifying itself no longer ends the turn, see moveArmies. */
   endTurn(boardStateIn: Record<string, unknown>, seatIndex: number): MoveResult {
     const state = cloneState(boardStateIn as unknown as ConquestState);
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');

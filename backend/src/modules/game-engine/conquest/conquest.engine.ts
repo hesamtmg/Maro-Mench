@@ -7,6 +7,7 @@ import {
 } from '../game-engine.interface';
 import {
   ADJACENCY,
+  CONTINENTS,
   STARTING_ARMIES_BY_PLAYER_COUNT,
   TERRITORIES,
 } from './board-config';
@@ -67,8 +68,22 @@ function territoryCount(state: ConquestState, seatIndex: number): number {
   return Object.values(state.owner).filter((s) => s === seatIndex).length;
 }
 
+function continentBonusFor(state: ConquestState, seatIndex: number): number {
+  let bonus = 0;
+  for (const continent of CONTINENTS) {
+    const members = TERRITORIES.filter((t) => t.continentId === continent.id);
+    if (members.every((t) => state.owner[t.id] === seatIndex)) {
+      bonus += continent.bonus;
+    }
+  }
+  return bonus;
+}
+
 function reinforcementsFor(state: ConquestState, seatIndex: number): number {
-  return Math.max(3, Math.floor(territoryCount(state, seatIndex) / 3));
+  return (
+    Math.max(3, Math.floor(territoryCount(state, seatIndex) / 3)) +
+    continentBonusFor(state, seatIndex)
+  );
 }
 
 function activeSeats(state: ConquestState): number[] {

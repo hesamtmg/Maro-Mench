@@ -2,6 +2,10 @@ import { ConquestEngine, ConquestState, CombatResult } from './conquest.engine';
 import { RoomPlayerSeat } from '../game-engine.interface';
 import { TERRITORIES, STARTING_ARMIES_BY_PLAYER_COUNT } from './board-config';
 
+const CORAL_TERRITORY_IDS = TERRITORIES.filter((t) => t.continentId === 'coral').map(
+  (t) => t.id,
+);
+
 function mockRolls(...faces: number[]) {
   const spy = jest.spyOn(Math, 'random');
   for (const face of faces) {
@@ -369,6 +373,41 @@ describe('ConquestEngine', () => {
       const result = move.boardState as unknown as ConquestState;
       expect(result.currentTurnSeat).toBe(1);
       expect(result.phase).toBe('reinforce');
+    });
+  });
+
+  describe('continent bonus', () => {
+    it('adds the continent bonus once a seat owns every territory in it', () => {
+      // Seat 0 owns only Coral Archipelago (6 territories, +3 bonus);
+      // seat 1 owns the other 36. Ending seat 1's turn hands seat 0 a
+      // fresh reinforce phase, so its reinforcementsRemaining reflects
+      // seat 0's bonus.
+      const coralOwner = Object.fromEntries(CORAL_TERRITORY_IDS.map((id) => [id, 0]));
+      const s = baseState(
+        { ...Object.fromEntries(TERRITORIES.map((t) => [t.id, 1])), ...coralOwner },
+        {},
+        { phase: 'fortify', currentTurnSeat: 1 },
+      );
+      const move = engine.endTurn(asRecord(s), 1);
+      const result = move.boardState as unknown as ConquestState;
+      expect(result.currentTurnSeat).toBe(0);
+      // Base: max(3, floor(6/3)) = 3, plus Coral Archipelago's +3 bonus.
+      expect(result.reinforcementsRemaining).toBe(6);
+    });
+
+    it('does not award a bonus for a partially-held continent', () => {
+      const coralOwner = Object.fromEntries(CORAL_TERRITORY_IDS.map((id) => [id, 0]));
+      coralOwner[CORAL_TERRITORY_IDS[0]] = 1; // one Coral territory stays seat 1's
+      const s = baseState(
+        { ...Object.fromEntries(TERRITORIES.map((t) => [t.id, 1])), ...coralOwner },
+        {},
+        { phase: 'fortify', currentTurnSeat: 1 },
+      );
+      const move = engine.endTurn(asRecord(s), 1);
+      const result = move.boardState as unknown as ConquestState;
+      // Only 5 Coral territories owned, no continent completed -- just
+      // the base max(3, floor(5/3)) = 3, no +3 on top.
+      expect(result.reinforcementsRemaining).toBe(3);
     });
   });
 });

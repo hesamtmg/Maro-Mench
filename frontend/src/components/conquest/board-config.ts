@@ -6,6 +6,7 @@
 export interface ContinentDef {
   id: string;
   name: string;
+  bonus: number;
 }
 
 export interface TerritoryDef {
@@ -17,12 +18,12 @@ export interface TerritoryDef {
 }
 
 export const CONTINENTS: ContinentDef[] = [
-  { id: 'frosthold', name: 'Frosthold' },
-  { id: 'meridian', name: 'Meridian Coast' },
-  { id: 'sunward', name: 'Sunward Reaches' },
-  { id: 'emerald', name: 'Emerald Basin' },
-  { id: 'ashfall', name: 'Ashfall Steppe' },
-  { id: 'coral', name: 'Coral Archipelago' },
+  { id: 'frosthold', name: 'Frosthold', bonus: 5 },
+  { id: 'meridian', name: 'Meridian Coast', bonus: 7 },
+  { id: 'sunward', name: 'Sunward Reaches', bonus: 5 },
+  { id: 'emerald', name: 'Emerald Basin', bonus: 4 },
+  { id: 'ashfall', name: 'Ashfall Steppe', bonus: 5 },
+  { id: 'coral', name: 'Coral Archipelago', bonus: 3 },
 ];
 
 export const CONTINENT_COLORS: Record<string, string> = {

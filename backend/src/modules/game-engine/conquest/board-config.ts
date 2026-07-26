@@ -7,6 +7,11 @@
 export interface ContinentDef {
   id: string;
   name: string;
+  // Bonus reinforcement armies awarded each turn for owning every
+  // territory in the continent -- roughly scaled by size and how many
+  // inter-continent bottlenecks it has to defend (more borders to hold =
+  // bigger bonus to compensate).
+  bonus: number;
 }
 
 export interface TerritoryDef {
@@ -18,13 +23,17 @@ export interface TerritoryDef {
 }
 
 export const CONTINENTS: ContinentDef[] = [
-  { id: 'frosthold', name: 'Frosthold' },
-  { id: 'meridian', name: 'Meridian Coast' },
-  { id: 'sunward', name: 'Sunward Reaches' },
-  { id: 'emerald', name: 'Emerald Basin' },
-  { id: 'ashfall', name: 'Ashfall Steppe' },
-  { id: 'coral', name: 'Coral Archipelago' },
+  { id: 'frosthold', name: 'Frosthold', bonus: 5 },
+  { id: 'meridian', name: 'Meridian Coast', bonus: 7 },
+  { id: 'sunward', name: 'Sunward Reaches', bonus: 5 },
+  { id: 'emerald', name: 'Emerald Basin', bonus: 4 },
+  { id: 'ashfall', name: 'Ashfall Steppe', bonus: 5 },
+  { id: 'coral', name: 'Coral Archipelago', bonus: 3 },
 ];
+
+export const CONTINENT_BY_ID: Record<string, ContinentDef> = Object.fromEntries(
+  CONTINENTS.map((c) => [c.id, c]),
+);
 
 export const TERRITORIES: TerritoryDef[] = [
   // Frosthold (7)

@@ -74,6 +74,27 @@ function isEliminated(seatIndex: number): boolean {
   return state.value?.players[seatIndex]?.eliminated ?? false;
 }
 
+// Continents currently fully owned by a seat, for showing why their
+// reinforcement count is bigger than the base territory-count math alone
+// would suggest.
+function continentsOwnedBy(seatIndex: number | null) {
+  const s = state.value;
+  if (!s || seatIndex == null) return [];
+  return CONTINENTS.filter((c) =>
+    TERRITORIES.filter((t) => t.continentId === c.id).every(
+      (t) => s.owner[t.id] === seatIndex
+    )
+  );
+}
+
+const myContinentBonus = computed(() => {
+  const owned = continentsOwnedBy(props.mySeatIndex);
+  return {
+    continents: owned,
+    total: owned.reduce((sum, c) => sum + c.bonus, 0),
+  };
+});
+
 // --- Layout ---
 
 const nodePositions = computed(() =>
@@ -314,6 +335,10 @@ function nodeClasses(territoryId: string) {
         <template v-if="state?.phase === 'reinforce'">
           <p><strong>Reinforce:</strong> click your territories to place armies.</p>
           <p class="text-muted">Remaining: {{ state.reinforcementsRemaining }}</p>
+          <p v-if="myContinentBonus.total > 0" class="text-muted cb-bonus-note">
+            Includes +{{ myContinentBonus.total }} for holding
+            {{ myContinentBonus.continents.map((c) => c.name).join(", ") }}
+          </p>
         </template>
 
         <template v-else-if="state?.phase === 'attack'">
@@ -403,6 +428,7 @@ function nodeClasses(territoryId: string) {
         <div v-for="c in CONTINENTS" :key="c.id" class="cb-legend-row">
           <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
           {{ c.name }}
+          <span class="text-muted">+{{ c.bonus }}</span>
         </div>
       </div>
     </div>
@@ -572,6 +598,14 @@ function nodeClasses(territoryId: string) {
   align-items: center;
   gap: 0.4rem;
   padding: 0.1rem 0;
+}
+
+.cb-legend-row .text-muted {
+  margin-left: auto;
+}
+
+.cb-bonus-note {
+  font-size: 0.72rem;
 }
 
 .cb-legend-swatch {

@@ -432,13 +432,19 @@ const trophiesOpen = ref(false);
 const battleOpen = ref(true);
 const myCardsOpen = ref(true);
 
+// Clicking a selected card deselects it. Clicking a new card while 3 are
+// already selected swaps out the oldest selection instead of silently
+// doing nothing -- lets a player just click through the cards they want
+// without having to manually deselect one first.
 function toggleCard(cardId: string) {
   const i = selectedCardIds.value.indexOf(cardId);
   if (i !== -1) {
     selectedCardIds.value.splice(i, 1);
     return;
   }
-  if (selectedCardIds.value.length >= 3) return;
+  if (selectedCardIds.value.length >= 3) {
+    selectedCardIds.value.shift();
+  }
   selectedCardIds.value.push(cardId);
 }
 
@@ -564,6 +570,7 @@ const continentGradientStops = computed(() =>
 const selectedFrom = ref<string | null>(null);
 const selectedTo = ref<string | null>(null);
 const attackDiceCount = ref(1);
+const fortifyMoveCount = ref(1);
 
 function clearSelection() {
   selectedFrom.value = null;
@@ -571,6 +578,7 @@ function clearSelection() {
   moveFromId.value = null;
   moveToId.value = null;
   moveCount.value = 1;
+  fortifyMoveCount.value = 1;
 }
 
 // Reset whenever the phase changes out from under a stale selection.
@@ -585,6 +593,14 @@ const maxAttackDice = computed(() => {
 });
 watch(maxAttackDice, (max) => {
   if (attackDiceCount.value > max) attackDiceCount.value = max;
+});
+
+const maxFortifyMoveCount = computed(() => {
+  if (!selectedFrom.value) return 1;
+  return Math.max(1, armiesOn(selectedFrom.value) - 1);
+});
+watch(maxFortifyMoveCount, (max) => {
+  if (fortifyMoveCount.value > max) fortifyMoveCount.value = max;
 });
 
 // Lets a player keep attacking the same border with one click instead of
@@ -717,6 +733,22 @@ function onTerritoryClick(territoryId: string) {
     if (selectedFrom.value && attackableTargets.value.has(territoryId)) {
       selectedTo.value = territoryId;
     }
+    return;
+  }
+
+  if (s.phase === "fortify") {
+    if (!selectedFrom.value) {
+      if (mine && armiesOn(territoryId) >= 2) selectedFrom.value = territoryId;
+      return;
+    }
+    if (territoryId === selectedFrom.value) {
+      selectedFrom.value = null;
+      return;
+    }
+    if (mine) {
+      selectedTo.value = territoryId;
+      fortifyMoveCount.value = 1;
+    }
   }
 }
 
@@ -724,6 +756,14 @@ function submitAttack() {
   if (!selectedFrom.value || !selectedTo.value) return;
   emit("attack", selectedFrom.value, selectedTo.value, attackDiceCount.value);
   selectedTo.value = null;
+}
+
+function submitFortifyMove() {
+  if (!selectedFrom.value || !selectedTo.value) return;
+  emit("move-armies", selectedFrom.value, selectedTo.value, fortifyMoveCount.value);
+  selectedFrom.value = null;
+  selectedTo.value = null;
+  fortifyMoveCount.value = 1;
 }
 
 function endAttackPhase() {
@@ -1126,45 +1166,24 @@ function nodeClasses(territoryId: string) {
         </template>
 
         <template v-else-if="state?.phase === 'fortify'">
-          <p><strong>Fortify:</strong> reposition your armies as many times as you like, then end your turn.</p>
-
-          <div class="cb-move-armies">
-            <p class="cb-move-armies-title">
-              <strong>Move armies</strong>
-              <span class="text-muted"> -- reposition troops anywhere on the map</span>
+          <p>
+            <strong>Fortify:</strong> click a territory of yours with 2+ armies, then another
+            territory of yours -- repeat as many times as you like, then end your turn.
+          </p>
+          <div v-if="selectedFrom && selectedTo" class="cb-attack-picker">
+            <p>
+              {{ TERRITORY_BY_ID[selectedFrom]?.name }} &rarr;
+              {{ TERRITORY_BY_ID[selectedTo]?.name }}
             </p>
-            <div class="row cb-move-armies-row">
-              <select v-model="moveFromId" class="cb-move-select">
-                <option :value="null" disabled>From territory</option>
-                <option v-for="t in myOwnedTerritories" :key="t.id" :value="t.id">
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
-              <select v-model="moveToId" class="cb-move-select">
-                <option :value="null" disabled>To territory</option>
-                <option
-                  v-for="t in myOwnedTerritories"
-                  :key="t.id"
-                  :value="t.id"
-                  :disabled="t.id === moveFromId"
-                >
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
+            <div class="row">
               <input
-                v-model.number="moveCount"
+                v-model.number="fortifyMoveCount"
                 type="number"
                 min="1"
-                :max="moveFromMaxCount"
+                :max="maxFortifyMoveCount"
                 class="cb-move-count"
               />
-              <button
-                class="btn btn-secondary"
-                :disabled="!canMoveArmies"
-                @click="submitMoveArmies"
-              >
-                Move
-              </button>
+              <button class="btn btn-primary" @click="submitFortifyMove">Move</button>
             </div>
           </div>
 

@@ -227,6 +227,7 @@ interface ConquestStateUpdatedEvent {
   tradedIn?: boolean;
   bonus?: number;
   territoryBonusId?: string | null;
+  movedArmies?: { from: string; to: string; count: number };
 }
 
 interface ConquestAttackResultEvent {
@@ -247,6 +248,10 @@ function conquestStateEventMessage(
     return `🃏 ${name} traded in a set for +${payload.bonus} armies${bonusNote}.`;
   }
   if (payload.reinforced) return `🪖 ${name} placed ${payload.count} army/armies on ${payload.reinforced}.`;
+  if (payload.movedArmies) {
+    const { from, to, count } = payload.movedArmies;
+    return `🚚 ${name} moved ${count} army/armies from ${from} to ${to}.`;
+  }
   if (payload.movedToFortify) return `⏭️ ${name} moved to the fortify phase.`;
   return null;
 }
@@ -803,6 +808,10 @@ export const useRoomStore = defineStore('room', {
 
     conquestReinforce(roomId: string, territoryId: string, count: number) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_REINFORCE, { roomId, territoryId, count });
+    },
+
+    conquestMoveArmies(roomId: string, fromId: string, toId: string, count: number) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_MOVE_ARMIES, { roomId, fromId, toId, count });
     },
 
     conquestAttack(roomId: string, fromId: string, toId: string, diceCount: number) {

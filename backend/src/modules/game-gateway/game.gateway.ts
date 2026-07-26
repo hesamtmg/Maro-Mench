@@ -1083,6 +1083,51 @@ export class GameGateway
     }
   }
 
+  /**
+   * Conquest-only: freely repositions armies between two owned territories
+   * during the reinforce phase (no adjacency required). Doesn't consume the
+   * turn or touch reinforcementsRemaining -- a player can do this as many
+   * times as they like before placing/finishing reinforcements.
+   */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_MOVE_ARMIES)
+  async onConquestMoveArmies(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody()
+    payload: { roomId: string; fromId: string; toId: string; count: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.conquestEngine.moveArmies(
+        gameState.boardState,
+        player.seatIndex,
+        payload.fromId,
+        payload.toId,
+        payload.count,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        movedArmies: {
+          from: TERRITORY_BY_ID[payload.fromId]?.name ?? payload.fromId,
+          to: TERRITORY_BY_ID[payload.toId]?.name ?? payload.toId,
+          count: payload.count,
+        },
+      });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   /** Conquest-only: resolves one attack roll. Doesn't consume the turn -- an attacker can keep attacking. */
   @SubscribeMessage(WS_EVENTS_IN.CONQUEST_ATTACK)
   async onConquestAttack(

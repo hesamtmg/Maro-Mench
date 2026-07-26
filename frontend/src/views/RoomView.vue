@@ -347,6 +347,10 @@ function handleConquestReinforce(territoryId: string, count: number) {
   roomStore.conquestReinforce(props.id, territoryId, count);
 }
 
+function handleConquestMoveArmies(fromId: string, toId: string, count: number) {
+  roomStore.conquestMoveArmies(props.id, fromId, toId, count);
+}
+
 function handleConquestAttack(fromId: string, toId: string, diceCount: number) {
   roomStore.conquestAttack(props.id, fromId, toId, diceCount);
 }
@@ -801,6 +805,7 @@ onMounted(() => {
             :last-combat="roomStore.conquestLastCombat"
             hide-player-summary
             @reinforce="handleConquestReinforce"
+            @move-armies="handleConquestMoveArmies"
             @attack="handleConquestAttack"
             @end-attack-phase="handleConquestEndAttackPhase"
             @fortify="handleConquestFortify"
@@ -882,6 +887,7 @@ onMounted(() => {
           :my-seat-index="myPlayer?.seatIndex ?? null"
           :last-combat="roomStore.conquestLastCombat"
           @reinforce="handleConquestReinforce"
+          @move-armies="handleConquestMoveArmies"
           @attack="handleConquestAttack"
           @end-attack-phase="handleConquestEndAttackPhase"
           @fortify="handleConquestFortify"

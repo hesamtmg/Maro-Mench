@@ -2,7 +2,7 @@ import { ConquestEngine, ConquestState, CombatResult } from './conquest.engine';
 import { RoomPlayerSeat } from '../game-engine.interface';
 import { TERRITORIES, STARTING_ARMIES_BY_PLAYER_COUNT } from './board-config';
 
-const CORAL_TERRITORY_IDS = TERRITORIES.filter((t) => t.continentId === 'coral').map(
+const OCEANIA_TERRITORY_IDS = TERRITORIES.filter((t) => t.continentId === 'oceania').map(
   (t) => t.id,
 );
 
@@ -165,58 +165,58 @@ describe('ConquestEngine', () => {
 
   describe('attack', () => {
     it('attacker wins both dice: defender loses 2 armies', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 4, pearl_isle: 2 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 4, sunset_bay: 2 });
       mockRolls(6, 5, /* attacker */ 2, 1 /* defender */);
       const { boardState, combat } = engine.attack(
         asRecord(s),
         0,
-        'whitepeak',
-        'pearl_isle',
+        'icemark',
+        'sunset_bay',
         2,
       );
       const result = boardState as unknown as ConquestState;
       expect(combat.attackerLosses).toBe(0);
       expect(combat.defenderLosses).toBe(2);
       expect(combat.captured).toBe(true);
-      expect(result.owner.pearl_isle).toBe(0);
+      expect(result.owner.sunset_bay).toBe(0);
     });
 
     it('defender wins ties: attacker loses', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 3, pearl_isle: 2 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 2 });
       mockRolls(4, /* attacker: 1 die */ 4 /* defender wins tie */);
-      const { combat } = engine.attack(asRecord(s), 0, 'whitepeak', 'pearl_isle', 1);
+      const { combat } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
       expect(combat.attackerLosses).toBe(1);
       expect(combat.defenderLosses).toBe(0);
       expect(combat.captured).toBe(false);
     });
 
     it('moves in armies equal to the attacking dice count on capture', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 5, pearl_isle: 1 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 5, sunset_bay: 1 });
       mockRolls(6, 5, 3, /* attacker: 3 dice, all high */ 2 /* defender: 1 die, loses */);
       const { boardState, combat } = engine.attack(
         asRecord(s),
         0,
-        'whitepeak',
-        'pearl_isle',
+        'icemark',
+        'sunset_bay',
         3,
       );
       const result = boardState as unknown as ConquestState;
       expect(combat.captured).toBe(true);
-      expect(result.armies.pearl_isle).toBe(3);
-      expect(result.armies.whitepeak).toBe(5 - 3);
+      expect(result.armies.sunset_bay).toBe(3);
+      expect(result.armies.icemark).toBe(5 - 3);
     });
 
     it('eliminates a defender who loses their last territory', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 3, pearl_isle: 1 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 1 });
       mockRolls(6, 1);
-      const { combat } = engine.attack(asRecord(s), 0, 'whitepeak', 'pearl_isle', 1);
+      const { combat } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
       expect(combat.eliminatedSeat).toBe(1);
     });
 
     it('declares a winner once only one seat remains active', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 3, pearl_isle: 1 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 1 });
       mockRolls(6, 1);
-      const { combat } = engine.attack(asRecord(s), 0, 'whitepeak', 'pearl_isle', 1);
+      const { combat } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
       expect(combat.isGameOver).toBe(true);
       expect(combat.winnerSeat).toBe(0);
     });
@@ -236,16 +236,16 @@ describe('ConquestEngine', () => {
     });
 
     it('rejects attacking with fewer than 2 armies at home', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 1, pearl_isle: 1 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 1, sunset_bay: 1 });
       expect(() =>
-        engine.attack(asRecord(s), 0, 'whitepeak', 'pearl_isle', 1),
+        engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1),
       ).toThrow('You need at least 2 armies to attack from there.');
     });
 
     it('caps attacker dice at armies-1 and at 3', () => {
-      const s = baseState({ pearl_isle: 1 }, { whitepeak: 3, pearl_isle: 1 });
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 1 });
       expect(() =>
-        engine.attack(asRecord(s), 0, 'whitepeak', 'pearl_isle', 3),
+        engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 3),
       ).toThrow('You can attack with 1 to 2 dice here.');
     });
 
@@ -285,7 +285,7 @@ describe('ConquestEngine', () => {
     });
 
     it('allows fortifying through a multi-hop owned corridor', () => {
-      // icemark -> coldharbor -> snowvale, all owned by seat 0.
+      // icemark -> tundrafall -> whitepeak -> snowvale, all owned by seat 0.
       const s = baseState({}, { icemark: 5, snowvale: 1 }, { phase: 'fortify' });
       const move = engine.fortify(asRecord(s), 0, 'icemark', 'snowvale', 2);
       const result = move.boardState as unknown as ConquestState;
@@ -378,34 +378,33 @@ describe('ConquestEngine', () => {
 
   describe('continent bonus', () => {
     it('adds the continent bonus once a seat owns every territory in it', () => {
-      // Seat 0 owns only Coral Archipelago (6 territories, +3 bonus);
-      // seat 1 owns the other 36. Ending seat 1's turn hands seat 0 a
-      // fresh reinforce phase, so its reinforcementsRemaining reflects
-      // seat 0's bonus.
-      const coralOwner = Object.fromEntries(CORAL_TERRITORY_IDS.map((id) => [id, 0]));
+      // Seat 0 owns only Oceania (6 territories, +3 bonus); seat 1 owns
+      // the other 36. Ending seat 1's turn hands seat 0 a fresh reinforce
+      // phase, so its reinforcementsRemaining reflects seat 0's bonus.
+      const oceaniaOwner = Object.fromEntries(OCEANIA_TERRITORY_IDS.map((id) => [id, 0]));
       const s = baseState(
-        { ...Object.fromEntries(TERRITORIES.map((t) => [t.id, 1])), ...coralOwner },
+        { ...Object.fromEntries(TERRITORIES.map((t) => [t.id, 1])), ...oceaniaOwner },
         {},
         { phase: 'fortify', currentTurnSeat: 1 },
       );
       const move = engine.endTurn(asRecord(s), 1);
       const result = move.boardState as unknown as ConquestState;
       expect(result.currentTurnSeat).toBe(0);
-      // Base: max(3, floor(6/3)) = 3, plus Coral Archipelago's +3 bonus.
+      // Base: max(3, floor(6/3)) = 3, plus Oceania's +3 bonus.
       expect(result.reinforcementsRemaining).toBe(6);
     });
 
     it('does not award a bonus for a partially-held continent', () => {
-      const coralOwner = Object.fromEntries(CORAL_TERRITORY_IDS.map((id) => [id, 0]));
-      coralOwner[CORAL_TERRITORY_IDS[0]] = 1; // one Coral territory stays seat 1's
+      const oceaniaOwner = Object.fromEntries(OCEANIA_TERRITORY_IDS.map((id) => [id, 0]));
+      oceaniaOwner[OCEANIA_TERRITORY_IDS[0]] = 1; // one Oceania territory stays seat 1's
       const s = baseState(
-        { ...Object.fromEntries(TERRITORIES.map((t) => [t.id, 1])), ...coralOwner },
+        { ...Object.fromEntries(TERRITORIES.map((t) => [t.id, 1])), ...oceaniaOwner },
         {},
         { phase: 'fortify', currentTurnSeat: 1 },
       );
       const move = engine.endTurn(asRecord(s), 1);
       const result = move.boardState as unknown as ConquestState;
-      // Only 5 Coral territories owned, no continent completed -- just
+      // Only 5 Oceania territories owned, no continent completed -- just
       // the base max(3, floor(5/3)) = 3, no +3 on top.
       expect(result.reinforcementsRemaining).toBe(3);
     });

@@ -9,6 +9,7 @@ import {
   TERRITORY_BY_ID,
   areAdjacent,
 } from "./conquest/board-config";
+import { CONTINENT_PATHS } from "./conquest/continent-paths";
 import type { RoomPlayer } from "../types";
 import type { ConquestCombatResult } from "../stores/room.store";
 
@@ -49,8 +50,12 @@ const isMyTurn = computed(
   () => props.mySeatIndex != null && props.mySeatIndex === props.currentTurnSeat
 );
 
+// Shared coordinate space with continent-paths.ts -- both are fitted to
+// this exact size by the same map-generation script, so territory nodes
+// (absolute x/y from board-config.ts, not fractions) land in the right
+// place on the coastlines without any extra scaling here.
 const VIEW_W = 1000;
-const VIEW_H = 780;
+const VIEW_H = 620;
 
 function playerColor(seatIndex: number | null): string {
   if (seatIndex == null) return "#999";
@@ -116,7 +121,7 @@ const myContinentBonus = computed(() => {
 // --- Layout ---
 
 const nodePositions = computed(() =>
-  TERRITORIES.map((t) => ({ ...t, cx: t.x * VIEW_W, cy: t.y * VIEW_H }))
+  TERRITORIES.map((t) => ({ ...t, cx: t.x, cy: t.y }))
 );
 const nodeById = computed(() =>
   Object.fromEntries(nodePositions.value.map((n) => [n.id, n]))
@@ -131,26 +136,6 @@ const edgeLines = computed(() =>
     x2: nodeById.value[b].cx,
     y2: nodeById.value[b].cy,
   }))
-);
-
-// Soft translucent backdrop per continent so the map reads as grouped
-// regions rather than a bare dot graph.
-const continentBlobs = computed(() =>
-  CONTINENTS.map((c) => {
-    const members = TERRITORIES.filter((t) => t.continentId === c.id);
-    const cx = members.reduce((s, t) => s + t.x, 0) / members.length;
-    const cy = members.reduce((s, t) => s + t.y, 0) / members.length;
-    const r =
-      Math.max(...members.map((t) => Math.hypot(t.x - cx, t.y - cy))) + 0.09;
-    return {
-      id: c.id,
-      name: c.name,
-      cx: cx * VIEW_W,
-      cy: cy * VIEW_H,
-      r: r * ((VIEW_W + VIEW_H) / 2),
-      color: CONTINENT_COLORS[c.id],
-    };
-  })
 );
 
 // --- Selection / interaction ---
@@ -293,34 +278,16 @@ function nodeClasses(territoryId: string) {
         :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
         preserveAspectRatio="xMidYMid meet"
       >
-        <defs>
-          <filter id="cb-goo">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="blur" />
-            <feColorMatrix
-              in="blur"
-              mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9"
-              result="goo"
-            />
-          </filter>
-        </defs>
-
-        <!-- Original fictional landmasses (not a real-world map): each
-             continent is a cluster of overlapping circles merged into one
-             organic blob via an SVG goo filter, one blob group per
-             continent so they read as solid regions rather than a bare
-             node graph. -->
-        <g v-for="c in CONTINENTS" :key="c.id" filter="url(#cb-goo)">
-          <circle
-            v-for="t in TERRITORIES.filter((t) => t.continentId === c.id)"
-            :key="t.id"
-            :cx="t.x * VIEW_W"
-            :cy="t.y * VIEW_H"
-            r="62"
-            :fill="CONTINENT_COLORS[c.id]"
-            class="cb-landmass"
-          />
-        </g>
+        <!-- Actual world coastlines, generated from public-domain Natural
+             Earth geographic data (see continent-paths.ts) -- an original
+             render of real geography, not traced from any game's art. -->
+        <path
+          v-for="c in CONTINENTS"
+          :key="c.id"
+          :d="CONTINENT_PATHS[c.id]"
+          :fill="CONTINENT_COLORS[c.id]"
+          class="cb-landmass"
+        />
 
         <line
           v-for="edge in edgeLines"
@@ -340,17 +307,18 @@ function nodeClasses(territoryId: string) {
           class="cb-node"
           @click="onTerritoryClick(node.id)"
         >
-          <circle :cx="node.cx + 1.5" :cy="node.cy + 2.5" r="19" class="cb-node-shadow" />
+          <title>{{ node.name }}</title>
+          <circle :cx="node.cx + 0.8" :cy="node.cy + 1.2" r="9" class="cb-node-shadow" />
           <circle
             :cx="node.cx"
             :cy="node.cy"
-            r="19"
+            r="9"
             :fill="playerColor(ownerOf(node.id))"
             class="cb-node-circle"
           />
-          <ellipse :cx="node.cx - 6" :cy="node.cy - 7" rx="9" ry="6" class="cb-node-gloss" />
-          <text :x="node.cx" :y="node.cy + 5" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
-          <text :x="node.cx" :y="node.cy + 32" class="cb-node-label">{{ node.name }}</text>
+          <ellipse :cx="node.cx - 3" :cy="node.cy - 3.3" rx="4" ry="2.5" class="cb-node-gloss" />
+          <text :x="node.cx" :y="node.cy + 3" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
+          <text :x="node.cx" :y="node.cy - 12" class="cb-node-label">{{ node.name }}</text>
         </g>
       </svg>
 
@@ -512,14 +480,16 @@ function nodeClasses(territoryId: string) {
 
 .conquest-map {
   width: 100%;
-  aspect-ratio: 1000 / 780;
+  aspect-ratio: 1000 / 620;
   background: radial-gradient(ellipse at 50% 40%, #1c2b45, #0f1524);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
 
 .cb-landmass {
-  opacity: 0.62;
+  fill-opacity: 0.85;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 0.75;
 }
 
 .cb-edge {
@@ -542,8 +512,8 @@ function nodeClasses(territoryId: string) {
 }
 
 .cb-node-circle {
-  stroke: rgba(0, 0, 0, 0.45);
-  stroke-width: 2;
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 1;
   transition: r 0.15s ease;
 }
 
@@ -554,43 +524,52 @@ function nodeClasses(territoryId: string) {
 
 .cb-node:hover .cb-node-circle {
   stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 1.5;
 }
 
 .cb-node-selected .cb-node-circle {
   stroke: #ffd93d;
-  stroke-width: 4;
+  stroke-width: 2.5;
 }
 
 .cb-node-target .cb-node-circle {
   stroke: #ff6b6b;
-  stroke-width: 4;
-}
-
-.cb-node-attackable .cb-node-circle {
-  stroke-dasharray: 3 2;
-  stroke: #ffd93d;
   stroke-width: 2.5;
 }
 
+.cb-node-attackable .cb-node-circle {
+  stroke-dasharray: 2 1.5;
+  stroke: #ffd93d;
+  stroke-width: 1.75;
+}
+
 .cb-node-armies {
-  font-size: 16px;
+  font-size: 8px;
   font-weight: 800;
   fill: #fff;
   text-anchor: middle;
   paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.6);
-  stroke-width: 3;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 1.5;
   pointer-events: none;
 }
 
 .cb-node-label {
-  font-size: 11px;
+  font-size: 9px;
   fill: #fff;
   text-anchor: middle;
   pointer-events: none;
   paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.75);
-  stroke-width: 2.5;
+  stroke: rgba(0, 0, 0, 0.8);
+  stroke-width: 2;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.cb-node:hover .cb-node-label,
+.cb-node-selected .cb-node-label,
+.cb-node-target .cb-node-label {
+  opacity: 1;
 }
 
 .cb-status-bar {

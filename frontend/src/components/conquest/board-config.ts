@@ -1,7 +1,7 @@
 // Mirrors backend/src/modules/game-engine/conquest/board-config.ts exactly
-// (territory/continent ids, names, layout coordinates, adjacency) -- the
-// client never invents its own map data, it only adds rendering-only
-// extras (continent colors) on top.
+// (territory/continent ids, names, coordinates, adjacency) -- the client
+// never invents its own map data. Coordinates are absolute positions in
+// the shared 1000x620 map space used by continent-paths.ts, not fractions.
 
 export interface ContinentDef {
   id: string;
@@ -18,158 +18,156 @@ export interface TerritoryDef {
 }
 
 export const CONTINENTS: ContinentDef[] = [
-  { id: 'frosthold', name: 'Frosthold', bonus: 5 },
-  { id: 'meridian', name: 'Meridian Coast', bonus: 7 },
-  { id: 'sunward', name: 'Sunward Reaches', bonus: 5 },
-  { id: 'emerald', name: 'Emerald Basin', bonus: 4 },
-  { id: 'ashfall', name: 'Ashfall Steppe', bonus: 5 },
-  { id: 'coral', name: 'Coral Archipelago', bonus: 3 },
+  { id: 'north_america', name: 'North America', bonus: 5 },
+  { id: 'asia', name: 'Asia', bonus: 7 },
+  { id: 'africa', name: 'Africa', bonus: 5 },
+  { id: 'south_america', name: 'South America', bonus: 4 },
+  { id: 'europe', name: 'Europe', bonus: 5 },
+  { id: 'oceania', name: 'Oceania', bonus: 3 },
 ];
 
 export const CONTINENT_COLORS: Record<string, string> = {
-  frosthold: '#7ec8e3',
-  meridian: '#38ac6a',
-  sunward: '#f0932b',
-  emerald: '#2f9e44',
-  ashfall: '#c0392b',
-  coral: '#5b8def',
+  north_america: '#4f8fdb',
+  south_america: '#52b788',
+  europe: '#e07a5f',
+  africa: '#f4a261',
+  asia: '#e9c46a',
+  oceania: '#9b5de5',
 };
 
 export const TERRITORIES: TerritoryDef[] = [
-  // Frosthold (7)
-  { id: 'icemark', name: 'Icemark', continentId: 'frosthold', x: 0.1, y: 0.1 },
-  { id: 'glacier_reach', name: 'Glacier Reach', continentId: 'frosthold', x: 0.22, y: 0.07 },
-  { id: 'frozen_cape', name: 'Frozen Cape', continentId: 'frosthold', x: 0.34, y: 0.12 },
-  { id: 'tundrafall', name: 'Tundrafall', continentId: 'frosthold', x: 0.46, y: 0.08 },
-  { id: 'whitepeak', name: 'Whitepeak', continentId: 'frosthold', x: 0.58, y: 0.14 },
-  { id: 'snowvale', name: 'Snowvale', continentId: 'frosthold', x: 0.36, y: 0.22 },
-  { id: 'coldharbor', name: 'Coldharbor', continentId: 'frosthold', x: 0.2, y: 0.2 },
+  // North America (7)
+  { id: 'icemark', name: 'Icemark', continentId: 'north_america', x: 165.4, y: 101.0 },
+  { id: 'glacier_reach', name: 'Glacier Reach', continentId: 'north_america', x: 412.8, y: 78.7 },
+  { id: 'frozen_cape', name: 'Frozen Cape', continentId: 'north_america', x: 329.6, y: 137.1 },
+  { id: 'tundrafall', name: 'Tundrafall', continentId: 'north_america', x: 239.3, y: 124.7 },
+  { id: 'whitepeak', name: 'Whitepeak', continentId: 'north_america', x: 201.7, y: 175.4 },
+  { id: 'snowvale', name: 'Snowvale', continentId: 'north_america', x: 277.7, y: 181.9 },
+  { id: 'coldharbor', name: 'Coldharbor', continentId: 'north_america', x: 220.3, y: 231.0 },
 
-  // Meridian Coast (9)
-  { id: 'port_meridian', name: 'Port Meridian', continentId: 'meridian', x: 0.06, y: 0.3 },
-  { id: 'sunset_bay', name: 'Sunset Bay', continentId: 'meridian', x: 0.16, y: 0.27 },
-  { id: 'goldshore', name: 'Goldshore', continentId: 'meridian', x: 0.28, y: 0.3 },
-  { id: 'ashport', name: 'Ashport', continentId: 'meridian', x: 0.34, y: 0.4 },
-  { id: 'ridgeway', name: 'Ridgeway', continentId: 'meridian', x: 0.24, y: 0.44 },
-  { id: 'stonebridge', name: 'Stonebridge', continentId: 'meridian', x: 0.12, y: 0.42 },
-  { id: 'lakehaven', name: 'Lakehaven', continentId: 'meridian', x: 0.06, y: 0.52 },
-  { id: 'riverrun', name: 'Riverrun', continentId: 'meridian', x: 0.18, y: 0.56 },
-  { id: 'highmarch', name: 'Highmarch', continentId: 'meridian', x: 0.3, y: 0.54 },
+  // South America (6)
+  { id: 'vineholt', name: 'Vineholt', continentId: 'south_america', x: 314.8, y: 286.4 },
+  { id: 'canopy_reach', name: 'Canopy Reach', continentId: 'south_america', x: 331.4, y: 315.7 },
+  { id: 'mistwood', name: 'Mistwood', continentId: 'south_america', x: 379.9, y: 345.0 },
+  { id: 'serpents_delta', name: "Serpent's Delta", continentId: 'south_america', x: 286.9, y: 332.0 },
+  { id: 'junglecrown', name: 'Junglecrown', continentId: 'south_america', x: 325.6, y: 364.6 },
+  { id: 'verdant_hollow', name: 'Verdant Hollow', continentId: 'south_america', x: 330.0, y: 430.0 },
 
-  // Sunward Reaches (7)
-  { id: 'duneshore', name: 'Duneshore', continentId: 'sunward', x: 0.42, y: 0.3 },
-  { id: 'emberwaste', name: 'Emberwaste', continentId: 'sunward', x: 0.54, y: 0.28 },
-  { id: 'sandfall', name: 'Sandfall', continentId: 'sunward', x: 0.66, y: 0.32 },
-  { id: 'scorchpeak', name: 'Scorchpeak', continentId: 'sunward', x: 0.7, y: 0.44 },
-  { id: 'oasis_vale', name: 'Oasis Vale', continentId: 'sunward', x: 0.58, y: 0.42 },
-  { id: 'redrock', name: 'Redrock', continentId: 'sunward', x: 0.46, y: 0.44 },
-  { id: 'sunspire', name: 'Sunspire', continentId: 'sunward', x: 0.56, y: 0.54 },
+  // Europe (7)
+  { id: 'cinderpeak', name: 'Cinderpeak', continentId: 'europe', x: 492.8, y: 130.9 },
+  { id: 'volcarest', name: 'Volcarest', continentId: 'europe', x: 534.0, y: 106.8 },
+  { id: 'steppewatch', name: 'Steppewatch', continentId: 'europe', x: 512.5, y: 149.7 },
+  { id: 'ironridge', name: 'Ironridge', continentId: 'europe', x: 525.7, y: 168.9 },
+  { id: 'blackspire', name: 'Blackspire', continentId: 'europe', x: 548.7, y: 137.1 },
+  { id: 'grayridge', name: 'Grayridge', continentId: 'europe', x: 573.9, y: 143.3 },
+  { id: 'cragmoor', name: 'Cragmoor', continentId: 'europe', x: 556.5, y: 168.9 },
 
-  // Emerald Basin (6)
-  { id: 'vineholt', name: 'Vineholt', continentId: 'emerald', x: 0.16, y: 0.66 },
-  { id: 'canopy_reach', name: 'Canopy Reach', continentId: 'emerald', x: 0.26, y: 0.64 },
-  { id: 'mistwood', name: 'Mistwood', continentId: 'emerald', x: 0.36, y: 0.68 },
-  { id: 'serpents_delta', name: "Serpent's Delta", continentId: 'emerald', x: 0.14, y: 0.8 },
-  { id: 'junglecrown', name: 'Junglecrown', continentId: 'emerald', x: 0.26, y: 0.82 },
-  { id: 'verdant_hollow', name: 'Verdant Hollow', continentId: 'emerald', x: 0.36, y: 0.84 },
+  // Africa (7)
+  { id: 'duneshore', name: 'Duneshore', continentId: 'africa', x: 500.0, y: 208.1 },
+  { id: 'emberwaste', name: 'Emberwaste', continentId: 'africa', x: 581.7, y: 221.2 },
+  { id: 'sandfall', name: 'Sandfall', continentId: 'africa', x: 541.7, y: 257.1 },
+  { id: 'scorchpeak', name: 'Scorchpeak', continentId: 'africa', x: 620.5, y: 279.9 },
+  { id: 'oasis_vale', name: 'Oasis Vale', continentId: 'africa', x: 561.8, y: 312.5 },
+  { id: 'redrock', name: 'Redrock', continentId: 'africa', x: 601.2, y: 315.7 },
+  { id: 'sunspire', name: 'Sunspire', continentId: 'africa', x: 565.0, y: 397.3 },
 
-  // Ashfall Steppe (7)
-  { id: 'cinderpeak', name: 'Cinderpeak', continentId: 'ashfall', x: 0.54, y: 0.6 },
-  { id: 'volcarest', name: 'Volcarest', continentId: 'ashfall', x: 0.64, y: 0.58 },
-  { id: 'steppewatch', name: 'Steppewatch', continentId: 'ashfall', x: 0.74, y: 0.62 },
-  { id: 'ironridge', name: 'Ironridge', continentId: 'ashfall', x: 0.78, y: 0.72 },
-  { id: 'blackspire', name: 'Blackspire', continentId: 'ashfall', x: 0.68, y: 0.76 },
-  { id: 'grayridge', name: 'Grayridge', continentId: 'ashfall', x: 0.58, y: 0.74 },
-  { id: 'cragmoor', name: 'Cragmoor', continentId: 'ashfall', x: 0.66, y: 0.86 },
+  // Asia (9)
+  { id: 'port_meridian', name: 'Port Meridian', continentId: 'asia', x: 638.1, y: 112.7 },
+  { id: 'sunset_bay', name: 'Sunset Bay', continentId: 'asia', x: 794.7, y: 106.8 },
+  { id: 'goldshore', name: 'Goldshore', continentId: 'asia', x: 621.1, y: 208.1 },
+  { id: 'ashport', name: 'Ashport', continentId: 'asia', x: 669.5, y: 149.7 },
+  { id: 'ridgeway', name: 'Ridgeway', continentId: 'asia', x: 714.3, y: 234.3 },
+  { id: 'stonebridge', name: 'Stonebridge', continentId: 'asia', x: 777.9, y: 191.7 },
+  { id: 'lakehaven', name: 'Lakehaven', continentId: 'asia', x: 786.6, y: 257.1 },
+  { id: 'riverrun', name: 'Riverrun', continentId: 'asia', x: 854.5, y: 185.2 },
+  { id: 'highmarch', name: 'Highmarch', continentId: 'asia', x: 817.6, y: 312.5 },
 
-  // Coral Archipelago (6)
-  { id: 'pearl_isle', name: 'Pearl Isle', continentId: 'coral', x: 0.86, y: 0.14 },
-  { id: 'reefhaven', name: 'Reefhaven', continentId: 'coral', x: 0.94, y: 0.2 },
-  { id: 'tideport', name: 'Tideport', continentId: 'coral', x: 0.9, y: 0.3 },
-  { id: 'saltmere', name: 'Saltmere', continentId: 'coral', x: 0.84, y: 0.38 },
-  { id: 'driftcay', name: 'Driftcay', continentId: 'coral', x: 0.92, y: 0.44 },
-  { id: 'stormatoll', name: 'Stormatoll', continentId: 'coral', x: 0.86, y: 0.52 },
+  // Oceania (6)
+  { id: 'pearl_isle', name: 'Pearl Isle', continentId: 'oceania', x: 832.9, y: 387.5 },
+  { id: 'reefhaven', name: 'Reefhaven', continentId: 'oceania', x: 870.5, y: 351.5 },
+  { id: 'tideport', name: 'Tideport', continentId: 'oceania', x: 901.1, y: 387.5 },
+  { id: 'saltmere', name: 'Saltmere', continentId: 'oceania', x: 865.2, y: 420.2 },
+  { id: 'driftcay', name: 'Driftcay', continentId: 'oceania', x: 901.4, y: 325.5 },
+  { id: 'stormatoll', name: 'Stormatoll', continentId: 'oceania', x: 944.1, y: 439.8 },
 ];
 
 const EDGES: Array<[string, string]> = [
-  // Frosthold
-  ['icemark', 'glacier_reach'],
-  ['glacier_reach', 'frozen_cape'],
-  ['frozen_cape', 'tundrafall'],
+  // North America
+  ['icemark', 'tundrafall'],
+  ['tundrafall', 'frozen_cape'],
+  ['frozen_cape', 'glacier_reach'],
   ['tundrafall', 'whitepeak'],
-  ['icemark', 'coldharbor'],
-  ['coldharbor', 'glacier_reach'],
-  ['coldharbor', 'snowvale'],
+  ['whitepeak', 'snowvale'],
   ['snowvale', 'frozen_cape'],
-  ['snowvale', 'whitepeak'],
+  ['whitepeak', 'coldharbor'],
+  ['snowvale', 'coldharbor'],
 
-  // Meridian Coast
-  ['port_meridian', 'sunset_bay'],
-  ['sunset_bay', 'goldshore'],
-  ['goldshore', 'ashport'],
-  ['ashport', 'ridgeway'],
-  ['ridgeway', 'stonebridge'],
-  ['stonebridge', 'port_meridian'],
-  ['stonebridge', 'lakehaven'],
-  ['lakehaven', 'riverrun'],
-  ['riverrun', 'ridgeway'],
-  ['riverrun', 'highmarch'],
-  ['highmarch', 'ashport'],
-  ['port_meridian', 'lakehaven'],
-
-  // Sunward Reaches
-  ['duneshore', 'emberwaste'],
-  ['emberwaste', 'sandfall'],
-  ['sandfall', 'scorchpeak'],
-  ['scorchpeak', 'oasis_vale'],
-  ['oasis_vale', 'emberwaste'],
-  ['oasis_vale', 'redrock'],
-  ['redrock', 'duneshore'],
-  ['redrock', 'sunspire'],
-  ['sunspire', 'oasis_vale'],
-  ['sunspire', 'scorchpeak'],
-
-  // Emerald Basin
+  // South America
   ['vineholt', 'canopy_reach'],
-  ['canopy_reach', 'mistwood'],
   ['vineholt', 'serpents_delta'],
+  ['canopy_reach', 'mistwood'],
+  ['canopy_reach', 'serpents_delta'],
+  ['canopy_reach', 'junglecrown'],
   ['serpents_delta', 'junglecrown'],
-  ['junglecrown', 'canopy_reach'],
+  ['mistwood', 'junglecrown'],
   ['junglecrown', 'verdant_hollow'],
-  ['verdant_hollow', 'mistwood'],
 
-  // Ashfall Steppe
+  // Europe
+  ['cinderpeak', 'steppewatch'],
   ['cinderpeak', 'volcarest'],
-  ['volcarest', 'steppewatch'],
+  ['volcarest', 'blackspire'],
   ['steppewatch', 'ironridge'],
-  ['ironridge', 'blackspire'],
-  ['blackspire', 'volcarest'],
+  ['steppewatch', 'blackspire'],
   ['blackspire', 'grayridge'],
-  ['grayridge', 'cinderpeak'],
+  ['blackspire', 'cragmoor'],
   ['grayridge', 'cragmoor'],
-  ['cragmoor', 'blackspire'],
+  ['ironridge', 'cragmoor'],
 
-  // Coral Archipelago
+  // Africa
+  ['duneshore', 'emberwaste'],
+  ['duneshore', 'sandfall'],
+  ['emberwaste', 'scorchpeak'],
+  ['emberwaste', 'sandfall'],
+  ['sandfall', 'oasis_vale'],
+  ['sandfall', 'scorchpeak'],
+  ['scorchpeak', 'redrock'],
+  ['oasis_vale', 'redrock'],
+  ['oasis_vale', 'sunspire'],
+  ['redrock', 'sunspire'],
+
+  // Asia
+  ['port_meridian', 'sunset_bay'],
+  ['port_meridian', 'ashport'],
+  ['port_meridian', 'goldshore'],
+  ['ashport', 'stonebridge'],
+  ['ashport', 'ridgeway'],
+  ['goldshore', 'ridgeway'],
+  ['stonebridge', 'sunset_bay'],
+  ['stonebridge', 'ridgeway'],
+  ['stonebridge', 'lakehaven'],
+  ['stonebridge', 'riverrun'],
+  ['sunset_bay', 'riverrun'],
+  ['ridgeway', 'lakehaven'],
+  ['lakehaven', 'highmarch'],
+
+  // Oceania
   ['pearl_isle', 'reefhaven'],
+  ['pearl_isle', 'saltmere'],
   ['reefhaven', 'tideport'],
+  ['reefhaven', 'driftcay'],
   ['tideport', 'saltmere'],
-  ['tideport', 'driftcay'],
-  ['driftcay', 'stormatoll'],
-  ['stormatoll', 'saltmere'],
-  ['saltmere', 'pearl_isle'],
+  ['tideport', 'stormatoll'],
+  ['driftcay', 'tideport'],
 
   // Inter-continent bottlenecks
-  ['icemark', 'port_meridian'],
-  ['coldharbor', 'sunset_bay'],
-  ['ashport', 'duneshore'],
-  ['highmarch', 'redrock'],
-  ['riverrun', 'vineholt'],
-  ['sunspire', 'cinderpeak'],
-  ['scorchpeak', 'volcarest'],
-  ['verdant_hollow', 'cragmoor'],
-  ['whitepeak', 'pearl_isle'],
-  ['sandfall', 'saltmere'],
-  ['steppewatch', 'stormatoll'],
+  ['icemark', 'sunset_bay'], // Bering Strait
+  ['coldharbor', 'vineholt'], // Panama
+  ['glacier_reach', 'cinderpeak'], // Greenland - Iceland - Britain
+  ['ironridge', 'duneshore'], // Gibraltar
+  ['grayridge', 'port_meridian'], // the Urals
+  ['cragmoor', 'goldshore'], // the Bosphorus
+  ['emberwaste', 'goldshore'], // Suez
+  ['highmarch', 'driftcay'], // Indonesia - New Guinea
 ];
 
 export const TERRITORY_BY_ID: Record<string, TerritoryDef> = Object.fromEntries(

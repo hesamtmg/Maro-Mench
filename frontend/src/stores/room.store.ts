@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { connectSocket, getSocket } from '../api/socket.client';
 import { WS_EVENTS_IN, WS_EVENTS_OUT } from '../api/ws-events.constants';
+import { TERRITORY_BY_ID } from '../components/conquest/board-config';
 import {
   playAhh,
   playBankruptSting,
@@ -191,6 +192,60 @@ interface RoomState {
   // frozen (turnDeadline is cleared -- see GAME_PAUSED/GAME_RESUMED below).
   isPaused: boolean;
   pausedBySeat: number | null;
+  // Conquest only: the most recent attack's dice results, for ConquestBoard
+  // to show as a battle-result panel. `id` is a unique counter so a
+  // watcher can detect a fresh attack even when the dice values repeat.
+  conquestLastCombat: (ConquestCombatResult & { id: number }) | null;
+}
+
+export interface ConquestCombatResult {
+  fromId: string;
+  toId: string;
+  attackerDice: number[];
+  defenderDice: number[];
+  attackerLosses: number;
+  defenderLosses: number;
+  captured: boolean;
+  eliminatedSeat: number | null;
+  isGameOver: boolean;
+  winnerSeat: number | null;
+}
+
+interface ConquestStateUpdatedEvent {
+  boardState: Record<string, unknown>;
+  seatIndex?: number;
+  reinforced?: string;
+  count?: number;
+  movedToFortify?: boolean;
+}
+
+interface ConquestAttackResultEvent {
+  boardState: Record<string, unknown>;
+  seatIndex: number;
+  combat: ConquestCombatResult;
+}
+
+function conquestStateEventMessage(
+  payload: ConquestStateUpdatedEvent,
+  room: Room | null,
+): string | null {
+  const name = payload.seatIndex != null ? displayNameForSeat(room, payload.seatIndex) : 'A player';
+  if (payload.reinforced) return `🪖 ${name} placed ${payload.count} army/armies on ${payload.reinforced}.`;
+  if (payload.movedToFortify) return `⏭️ ${name} moved to the fortify phase.`;
+  return null;
+}
+
+function conquestMoveMessage(
+  name: string,
+  payload: Record<string, unknown>,
+): string {
+  if (payload.fortified) {
+    const from = TERRITORY_BY_ID[payload.fromId as string]?.name ?? payload.fromId;
+    const to = TERRITORY_BY_ID[payload.toId as string]?.name ?? payload.toId;
+    return `🚚 ${name} moved ${payload.count} army/armies from ${from} to ${to}.`;
+  }
+  if (payload.timedOut) return `⏭️ ${name}'s turn timed out and was ended automatically.`;
+  return `⏭️ ${name} ended their turn.`;
 }
 
 // Mirrors monopolyEventMessage's priority order, one sound per outcome.
@@ -257,6 +312,7 @@ let celebrationTimer: ReturnType<typeof setTimeout> | undefined;
 
 let nextEventLogId = 1;
 let nextMonopolyCardId = 1;
+let nextConquestCombatId = 1;
 
 export const useRoomStore = defineStore('room', {
   state: (): RoomState => ({
@@ -277,6 +333,7 @@ export const useRoomStore = defineStore('room', {
     lastMonopolyCard: null,
     isPaused: false,
     pausedBySeat: null,
+    conquestLastCombat: null,
   }),
 
   actions: {
@@ -329,6 +386,7 @@ export const useRoomStore = defineStore('room', {
         this.isRolling = false;
         this.monopolyDice = null;
         this.lastMonopolyCard = null;
+        this.conquestLastCombat = null;
         // Also fires on rejoin/reconnect (see onJoinRoom on the backend),
         // so a paused room's turn timer must NOT be reset to a fresh 30s
         // for whoever's rejoining -- respect the server's isPaused flag.
@@ -407,8 +465,11 @@ export const useRoomStore = defineStore('room', {
         };
 
         const isMonopoly = this.room?.gameType.code === 'monopoly';
+        const isConquest = this.room?.gameType.code === 'conquest';
 
-        if (isMonopoly) {
+        if (isConquest) {
+          this.pushEvent(conquestMoveMessage(name, movePayload), 'info', 2500);
+        } else if (isMonopoly) {
           const die1 = movePayload.die1 as number | undefined;
           const die2 = movePayload.die2 as number | undefined;
           if (die1 != null && die2 != null) {
@@ -552,6 +613,49 @@ export const useRoomStore = defineStore('room', {
         },
       );
 
+      // Conquest only: reinforcing or ending the attack phase changes
+      // boardState without consuming the turn, same reasoning as Monopoly's
+      // build-house above.
+      socket.on(
+        WS_EVENTS_OUT.CONQUEST_STATE_UPDATED,
+        (payload: ConquestStateUpdatedEvent) => {
+          this.boardState = payload.boardState;
+          const message = conquestStateEventMessage(payload, this.room);
+          if (message) {
+            this.pushEvent(message, 'info', 2500);
+            if (payload.reinforced) playHammerTap();
+          }
+        },
+      );
+
+      socket.on(
+        WS_EVENTS_OUT.CONQUEST_ATTACK_RESULT,
+        (payload: ConquestAttackResultEvent) => {
+          this.boardState = payload.boardState;
+          this.conquestLastCombat = { ...payload.combat, id: nextConquestCombatId++ };
+          const name = displayNameForSeat(this.room, payload.seatIndex);
+          const fromName = TERRITORY_BY_ID[payload.combat.fromId]?.name ?? payload.combat.fromId;
+          const toName = TERRITORY_BY_ID[payload.combat.toId]?.name ?? payload.combat.toId;
+          if (payload.combat.captured) {
+            this.pushEvent(`⚔️ ${name} captured ${toName} from ${fromName}!`, 'success');
+            playCashRegister();
+            this.triggerCelebration('victory');
+          } else {
+            this.pushEvent(
+              `⚔️ ${name} attacked ${toName} from ${fromName} (-${payload.combat.attackerLosses} attacker, -${payload.combat.defenderLosses} defender).`,
+              'info',
+              2500,
+            );
+            playCrash();
+          }
+          if (payload.combat.eliminatedSeat != null) {
+            const eliminatedName = displayNameForSeat(this.room, payload.combat.eliminatedSeat);
+            this.pushEvent(`💀 ${eliminatedName} has been eliminated!`, 'error');
+            playBankruptSting();
+          }
+        },
+      );
+
       this.listenersBound = true;
     },
 
@@ -676,6 +780,26 @@ export const useRoomStore = defineStore('room', {
       getSocket().emit(WS_EVENTS_IN.MONOPOLY_DECLARE_BANKRUPTCY, { roomId });
     },
 
+    conquestReinforce(roomId: string, territoryId: string, count: number) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_REINFORCE, { roomId, territoryId, count });
+    },
+
+    conquestAttack(roomId: string, fromId: string, toId: string, diceCount: number) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_ATTACK, { roomId, fromId, toId, diceCount });
+    },
+
+    conquestEndAttackPhase(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_END_ATTACK_PHASE, { roomId });
+    },
+
+    conquestFortify(roomId: string, fromId: string, toId: string, count: number) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_FORTIFY, { roomId, fromId, toId, count });
+    },
+
+    conquestEndTurn(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_END_TURN, { roomId });
+    },
+
     kickPlayer(roomId: string, targetUserId: string) {
       getSocket().emit(WS_EVENTS_IN.KICK_PLAYER, { roomId, targetUserId });
     },
@@ -702,6 +826,7 @@ export const useRoomStore = defineStore('room', {
       this.lastMonopolyCard = null;
       this.isPaused = false;
       this.pausedBySeat = null;
+      this.conquestLastCombat = null;
     },
   },
 });

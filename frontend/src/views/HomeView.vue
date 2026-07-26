@@ -34,6 +34,15 @@ const monopolySwatch = Array.from({ length: 16 }, (_, i) => {
   return MONOPOLY_CELL_COLORS[(row * 4 + col) % MONOPOLY_CELL_COLORS.length];
 });
 
+// Conquest tile: a handful of dots in continent colors, echoing the
+// territory-graph board at a glance.
+const CONQUEST_DOT_COLORS = ['#7ec8e3', '#38ac6a', '#f0932b', '#2f9e44', '#c0392b', '#5b8def'];
+const conquestDots = Array.from({ length: 12 }, (_, i) => ({
+  color: CONQUEST_DOT_COLORS[i % CONQUEST_DOT_COLORS.length],
+  left: `${12 + ((i * 37) % 76)}%`,
+  top: `${10 + ((i * 53) % 80)}%`,
+}));
+
 function chooseGame(gameTypeCode: GameTypeCode) {
   void router.push({ name: 'lobby', query: { game: gameTypeCode } });
 }
@@ -103,6 +112,18 @@ async function handleLogout() {
           />
         </span>
         <strong>Monopoly</strong>
+      </button>
+
+      <button class="game-tile" @click="chooseGame('conquest')">
+        <span class="game-tile-pic conquest-pic" aria-hidden="true">
+          <span
+            v-for="(dot, i) in conquestDots"
+            :key="i"
+            class="conquest-pic-dot"
+            :style="{ background: dot.color, left: dot.left, top: dot.top }"
+          />
+        </span>
+        <strong>Conquest</strong>
       </button>
     </div>
   </div>
@@ -238,5 +259,20 @@ async function handleLogout() {
 
 .monopoly-pic-cell {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+/* Conquest tile: scattered dots in continent colors, echoing the
+   territory-graph board. */
+.conquest-pic {
+  position: relative;
+  background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+}
+
+.conquest-pic-dot {
+  position: absolute;
+  width: 12%;
+  height: 12%;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
 }
 </style>

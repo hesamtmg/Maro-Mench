@@ -11,6 +11,8 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server } from 'socket.io';
+import { ConquestEngine } from '../game-engine/conquest/conquest.engine';
+import { TERRITORY_BY_ID } from '../game-engine/conquest/board-config';
 import { GameEngineFactory } from '../game-engine/game-engine.factory';
 import { BOARD, HOTEL_LEVEL } from '../game-engine/monopoly/board-config';
 import { MonopolyEngine } from '../game-engine/monopoly/monopoly.engine';
@@ -85,6 +87,7 @@ export class GameGateway
     private readonly scheduler: RoomSchedulerService,
     private readonly matchmakingService: MatchmakingService,
     private readonly monopolyEngine: MonopolyEngine,
+    private readonly conquestEngine: ConquestEngine,
   ) {}
 
   onModuleInit() {
@@ -1045,6 +1048,175 @@ export class GameGateway
     }
   }
 
+  /** Conquest-only: places reinforcement armies on an owned territory. Doesn't consume the turn. */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_REINFORCE)
+  async onConquestReinforce(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; territoryId: string; count: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.conquestEngine.reinforce(
+        gameState.boardState,
+        player.seatIndex,
+        payload.territoryId,
+        payload.count,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        reinforced: TERRITORY_BY_ID[payload.territoryId]?.name ?? payload.territoryId,
+        count: payload.count,
+      });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Conquest-only: resolves one attack roll. Doesn't consume the turn -- an attacker can keep attacking. */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_ATTACK)
+  async onConquestAttack(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody()
+    payload: { roomId: string; fromId: string; toId: string; diceCount: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const { boardState, combat } = this.conquestEngine.attack(
+        gameState.boardState,
+        player.seatIndex,
+        payload.fromId,
+        payload.toId,
+        payload.diceCount,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_ATTACK_RESULT, {
+        boardState,
+        seatIndex: player.seatIndex,
+        combat,
+      });
+
+      if (combat.isGameOver) {
+        this.scheduler.clearAllForRoom(room.id);
+        await this.gameStateService.finishGame(room.id);
+        this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
+          winnerSeat: combat.winnerSeat,
+        });
+      }
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Conquest-only: voluntarily ends the attack phase (no more attacks this turn) and moves to fortify. */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_END_ATTACK_PHASE)
+  async onConquestEndAttackPhase(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const boardState = this.conquestEngine.endAttackPhase(
+        gameState.boardState,
+        player.seatIndex,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        movedToFortify: true,
+      });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Conquest-only: moves armies once between owned, connected territories, ending the turn. */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_FORTIFY)
+  async onConquestFortify(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody()
+    payload: { roomId: string; fromId: string; toId: string; count: number },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const moveResult = this.conquestEngine.fortify(
+        gameState.boardState,
+        player.seatIndex,
+        payload.fromId,
+        payload.toId,
+        payload.count,
+      );
+      await this.applyAndBroadcastMove(room, gameState, player.seatIndex, 0, moveResult);
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
+  /** Conquest-only: ends the turn without fortifying (from the attack or fortify phase). */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_END_TURN)
+  async onConquestEndTurn(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const moveResult = this.conquestEngine.endTurn(
+        gameState.boardState,
+        player.seatIndex,
+      );
+      await this.applyAndBroadcastMove(room, gameState, player.seatIndex, 0, moveResult);
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   private async applyAndBroadcastMove(
     room: Room,
     gameState: Awaited<ReturnType<GameStateService['getGameState']>>,
@@ -1112,6 +1284,23 @@ export class GameGateway
           reason,
         );
         if (resolved) return;
+      }
+
+      // Conquest has its own turn/phase state inside boardState (reinforce
+      // -> attack -> fortify, with eliminated seats skipped) -- the generic
+      // "cycle to the next seatIndex" fallback below doesn't know about any
+      // of that, so a stalled Conquest turn is force-ended through the
+      // engine instead, same idea as Monopoly's stalled-decision handling.
+      if (room.gameType.code === GameTypeCode.CONQUEST) {
+        const moveResult = this.conquestEngine.forceEndTurn(gameState.boardState);
+        const skippedSeat = gameState.currentTurnSeat;
+        this.server.to(roomId).emit(WS_EVENTS_OUT.TURN_SKIPPED, {
+          seatIndex: skippedSeat,
+          reason,
+          nextTurnSeat: moveResult.nextTurnSeat,
+        });
+        await this.applyAndBroadcastMove(room, gameState, skippedSeat, 0, moveResult);
+        return;
       }
 
       const sortedActive = [...seats].sort((a, b) => a.seatIndex - b.seatIndex);

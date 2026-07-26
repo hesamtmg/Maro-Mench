@@ -20,10 +20,17 @@ import {
 import { useToastStore, type ToastType } from './toast.store';
 import type { Room } from '../types';
 
-// Must match backend/src/modules/game-gateway/room-scheduler.service.ts
-// TURN_TIMEOUT_MS -- there's no event field carrying this, so it's
-// mirrored here to drive the countdown display.
+// Must match backend/src/modules/game-gateway/game.gateway.ts's
+// scheduleTurnTimeoutFor -- there's no event field carrying the active
+// duration, so it's mirrored here to drive the countdown display.
+// Conquest turns get a much longer clock (a single turn there can span
+// several reinforcements plus multiple attack rolls); every other game
+// keeps the shared default.
 const TURN_TIMEOUT_MS = 30_000;
+const CONQUEST_TURN_TIMEOUT_MS = 10 * 60_000;
+function turnTimeoutMsFor(gameTypeCode: string | undefined): number {
+  return gameTypeCode === 'conquest' ? CONQUEST_TURN_TIMEOUT_MS : TURN_TIMEOUT_MS;
+}
 
 interface DiceRolledEvent {
   seatIndex: number;
@@ -401,7 +408,7 @@ export const useRoomStore = defineStore('room', {
         // for whoever's rejoining -- respect the server's isPaused flag.
         this.isPaused = payload.isPaused ?? false;
         this.pausedBySeat = null;
-        this.turnDeadline = this.isPaused ? null : Date.now() + TURN_TIMEOUT_MS;
+        this.turnDeadline = this.isPaused ? null : Date.now() + turnTimeoutMsFor(this.room?.gameType.code);
         this.pushEvent('🎲 The game has started!', 'success');
       });
 
@@ -442,7 +449,7 @@ export const useRoomStore = defineStore('room', {
         (payload: AwaitingMoveChoiceEvent) => {
           this.awaitingMoveChoice = true;
           this.awaitingDiceValue = payload.diceValue;
-          this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+          this.turnDeadline = Date.now() + turnTimeoutMsFor(this.room?.gameType.code);
         },
       );
 
@@ -452,7 +459,7 @@ export const useRoomStore = defineStore('room', {
         this.awaitingMoveChoice = false;
         this.awaitingDiceValue = null;
         // Optimistic reschedule; a GAME_OVER right behind this clears it.
-        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+        this.turnDeadline = Date.now() + turnTimeoutMsFor(this.room?.gameType.code);
 
         const name = displayNameForSeat(this.room, payload.seatIndex);
         const movePayload = payload.movePayload ?? {};
@@ -541,7 +548,7 @@ export const useRoomStore = defineStore('room', {
         // stayed pointed at the skipped player forever, so no one's
         // client ever agreed on whose turn it actually was.
         this.currentTurnSeat = payload.nextTurnSeat;
-        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+        this.turnDeadline = Date.now() + turnTimeoutMsFor(this.room?.gameType.code);
         const name = displayNameForSeat(this.room, payload.seatIndex);
         this.pushEvent(`⏭️ ${name}'s turn was skipped (${payload.reason}).`, 'info');
         playAhh();
@@ -606,7 +613,7 @@ export const useRoomStore = defineStore('room', {
         this.boardState = payload.boardState;
         this.currentTurnSeat = payload.nextTurnSeat;
         this.oloLiveOpponentPositions = null;
-        this.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+        this.turnDeadline = Date.now() + turnTimeoutMsFor(this.room?.gameType.code);
         const name = displayNameForSeat(this.room, payload.seatIndex);
         this.pushEvent(`🥏 ${name} took a shot.`, 'info', 2500);
       });
@@ -816,6 +823,10 @@ export const useRoomStore = defineStore('room', {
 
     conquestTradeCards(roomId: string, cardIds: string[]) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_TRADE_CARDS, { roomId, cardIds });
+    },
+
+    conquestPassTurn(roomId: string) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_PASS_TURN, { roomId });
     },
 
     kickPlayer(roomId: string, targetUserId: string) {

@@ -30,6 +30,7 @@ const emit = defineEmits<{
   fortify: [fromId: string, toId: string, count: number];
   "end-turn": [];
   "trade-cards": [cardIds: string[]];
+  "pass-turn": [];
 }>();
 
 interface ConquestPlayerState {
@@ -77,6 +78,188 @@ const isMyTurn = computed(
 // place on the coastlines without any extra scaling here.
 const VIEW_W = 1000;
 const VIEW_H = 620;
+
+// --- Zoom / pan ---
+// The map defaults to showing the whole world, which makes labels and
+// army counts tiny on anything but a large screen. Scroll/pinch to zoom
+// (toward the cursor/pinch center) and drag to pan around; +/-/reset
+// buttons cover touch devices with no wheel. This only changes the SVG's
+// viewBox -- territory click targets are unaffected, since SVG hit
+// -testing works in the element's own coordinate space regardless of how
+// the viewBox is currently framed.
+const svgRef = ref<SVGSVGElement | null>(null);
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 5;
+const zoom = ref(MIN_ZOOM);
+const viewX = ref(0);
+const viewY = ref(0);
+const viewW = computed(() => VIEW_W / zoom.value);
+const viewH = computed(() => VIEW_H / zoom.value);
+const viewBoxStr = computed(
+  () => `${viewX.value} ${viewY.value} ${viewW.value} ${viewH.value}`
+);
+
+function clampView() {
+  viewX.value = Math.max(0, Math.min(VIEW_W - viewW.value, viewX.value));
+  viewY.value = Math.max(0, Math.min(VIEW_H - viewH.value, viewY.value));
+}
+
+function svgPointFromClient(clientX: number, clientY: number): { x: number; y: number } | null {
+  const svg = svgRef.value;
+  if (!svg) return null;
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return null;
+  const pt = svg.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  const transformed = pt.matrixTransform(ctm.inverse());
+  return { x: transformed.x, y: transformed.y };
+}
+
+// Re-centers the view on `newZoom` while keeping the given world point
+// fixed at whatever screen position it currently occupies -- shared by
+// wheel-zoom, the +/- buttons, and (per-frame) pinch-zoom. Unlike a
+// simple "zoom around the center" this also naturally handles two-finger
+// panning: feeding it the *current* world point under the pinch midpoint
+// every frame, even when the zoom level barely changes, re-centers the
+// view to follow the fingers.
+function applyZoomAnchored(newZoomRaw: number, anchor: { x: number; y: number }) {
+  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomRaw));
+  const fx = (anchor.x - viewX.value) / viewW.value;
+  const fy = (anchor.y - viewY.value) / viewH.value;
+  const newW = VIEW_W / newZoom;
+  const newH = VIEW_H / newZoom;
+  viewX.value = anchor.x - fx * newW;
+  viewY.value = anchor.y - fy * newH;
+  zoom.value = newZoom;
+  clampView();
+}
+
+function zoomTo(newZoomRaw: number, anchor?: { x: number; y: number }) {
+  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomRaw));
+  if (newZoom === zoom.value) return;
+  const point = anchor ?? { x: viewX.value + viewW.value / 2, y: viewY.value + viewH.value / 2 };
+  applyZoomAnchored(newZoom, point);
+}
+
+function onMapWheel(evt: WheelEvent) {
+  evt.preventDefault();
+  const point = svgPointFromClient(evt.clientX, evt.clientY);
+  zoomTo(zoom.value * (evt.deltaY < 0 ? 1.25 : 0.8), point ?? undefined);
+}
+
+function zoomInButton() {
+  zoomTo(zoom.value * 1.5);
+}
+
+function zoomOutButton() {
+  zoomTo(zoom.value / 1.5);
+}
+
+function resetZoom() {
+  zoom.value = MIN_ZOOM;
+  viewX.value = 0;
+  viewY.value = 0;
+}
+
+const isPanning = ref(false);
+// True once a pointer-down-then-move exceeds a small threshold -- lets
+// onTerritoryClick tell a real drag/pinch apart from a tap/click that
+// happens to fire right after pointerup.
+const dragMoved = ref(false);
+// clientX/Y per active pointer id -- one entry while dragging with a
+// single finger/mouse, two while pinching.
+const activePointers = new Map<number, { x: number; y: number }>();
+let panPointerId: number | null = null;
+let lastPointer = { x: 0, y: 0 };
+let downPointer = { x: 0, y: 0 };
+let pinchLastDist: number | null = null;
+
+function pinchDistance(): number {
+  const [a, b] = [...activePointers.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function pinchMidpoint(): { x: number; y: number } {
+  const [a, b] = [...activePointers.values()];
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function startSinglePointerPan(id: number, pos: { x: number; y: number }) {
+  panPointerId = id;
+  lastPointer = pos;
+  downPointer = pos;
+  isPanning.value = zoom.value > MIN_ZOOM;
+}
+
+function onMapPointerDown(evt: PointerEvent) {
+  // Deliberately NOT calling setPointerCapture here: capturing on every
+  // pointerdown -- even a plain click that never moves -- makes Chromium
+  // retarget the resulting "click" event to the capturing element (the
+  // svg) instead of the territory <g> the user actually clicked, so
+  // territory selection silently stops working. Capture is instead
+  // acquired lazily in onMapPointerMove, only once a real drag/pinch is
+  // detected.
+  activePointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+  dragMoved.value = false;
+
+  if (activePointers.size === 2) {
+    isPanning.value = false;
+    pinchLastDist = pinchDistance();
+  } else if (activePointers.size === 1) {
+    startSinglePointerPan(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+  }
+}
+
+function onMapPointerMove(evt: PointerEvent) {
+  if (!activePointers.has(evt.pointerId)) return;
+  activePointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
+
+  if (activePointers.size >= 2) {
+    if (!dragMoved.value) svgRef.value?.setPointerCapture(evt.pointerId);
+    const dist = pinchDistance();
+    const mid = pinchMidpoint();
+    const anchor = svgPointFromClient(mid.x, mid.y);
+    if (anchor && pinchLastDist) {
+      applyZoomAnchored(zoom.value * (dist / pinchLastDist), anchor);
+    }
+    pinchLastDist = dist;
+    dragMoved.value = true;
+    return;
+  }
+
+  if (!isPanning.value || evt.pointerId !== panPointerId) return;
+  const svg = svgRef.value;
+  if (!svg) return;
+  if (Math.abs(evt.clientX - downPointer.x) > 4 || Math.abs(evt.clientY - downPointer.y) > 4) {
+    if (!dragMoved.value) svg.setPointerCapture(evt.pointerId);
+    dragMoved.value = true;
+  }
+  const rect = svg.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const dx = ((evt.clientX - lastPointer.x) / rect.width) * viewW.value;
+  const dy = ((evt.clientY - lastPointer.y) / rect.height) * viewH.value;
+  viewX.value -= dx;
+  viewY.value -= dy;
+  clampView();
+  lastPointer = { x: evt.clientX, y: evt.clientY };
+}
+
+function onMapPointerUp(evt: PointerEvent) {
+  activePointers.delete(evt.pointerId);
+  if (activePointers.size < 2) pinchLastDist = null;
+  if (evt.pointerId === panPointerId) {
+    isPanning.value = false;
+    panPointerId = null;
+  }
+  // One finger left after a pinch -- hand off to single-pointer panning
+  // instead of just stopping, so lifting the second finger doesn't
+  // abruptly end the gesture.
+  if (activePointers.size === 1) {
+    const [[id, pos]] = activePointers;
+    startSinglePointerPan(id, pos);
+  }
+}
 
 function playerColor(seatIndex: number | null): string {
   if (seatIndex == null) return "#999";
@@ -292,6 +475,7 @@ const attackableTargets = computed(() => {
 });
 
 function onTerritoryClick(territoryId: string) {
+  if (dragMoved.value) return;
   if (!isMyTurn.value) return;
   const s = state.value;
   if (!s) return;
@@ -355,6 +539,16 @@ function endTurn() {
   emit("end-turn");
 }
 
+// Voluntary version of the turn-timeout scheduler's stall protection --
+// auto-places any leftover reinforcements on the strongest territory and
+// ends the turn immediately, from any phase. Useful now that the actual
+// timeout is 10 minutes: a player who's done for the turn shouldn't have
+// to wait that long just to hand off.
+function passTurn() {
+  clearSelection();
+  emit("pass-turn");
+}
+
 // --- Battle result panel ---
 
 const rollingCombat = ref(false);
@@ -383,9 +577,16 @@ function nodeClasses(territoryId: string) {
     <div class="conquest-main">
       <div class="cb-map-wrap">
       <svg
+        ref="svgRef"
         class="conquest-map"
-        :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
+        :class="{ 'cb-map-panning': isPanning }"
+        :viewBox="viewBoxStr"
         preserveAspectRatio="xMidYMid meet"
+        @wheel="onMapWheel"
+        @pointerdown="onMapPointerDown"
+        @pointermove="onMapPointerMove"
+        @pointerup="onMapPointerUp"
+        @pointercancel="onMapPointerUp"
       >
         <!-- Actual world coastlines, generated from public-domain Natural
              Earth geographic data (see continent-paths.ts) -- an original
@@ -460,6 +661,21 @@ function nodeClasses(territoryId: string) {
           <text x="0" y="4" class="cb-continent-badge-text">+{{ c.bonus }}</text>
         </g>
       </svg>
+
+      <div class="cb-zoom-controls">
+        <button type="button" class="cb-zoom-btn" aria-label="Zoom in" title="Zoom in" @click="zoomInButton">+</button>
+        <button type="button" class="cb-zoom-btn" aria-label="Zoom out" title="Zoom out" @click="zoomOutButton">&minus;</button>
+        <button
+          v-if="zoom > MIN_ZOOM"
+          type="button"
+          class="cb-zoom-btn cb-zoom-reset"
+          aria-label="Reset zoom"
+          title="Reset zoom"
+          @click="resetZoom"
+        >
+          ⤢
+        </button>
+      </div>
 
       <div v-if="state" class="cb-trophies-float">
         <button
@@ -608,6 +824,10 @@ function nodeClasses(territoryId: string) {
           </div>
           <button class="btn btn-secondary" @click="endTurn">End turn without fortifying</button>
         </template>
+
+        <button class="btn btn-secondary cb-pass-btn" title="Auto-place any leftover reinforcements and hand off immediately" @click="passTurn">
+          ⏭️ Pass turn
+        </button>
       </div>
       <div v-else-if="state" class="card cb-action">
         <p class="text-muted">Waiting for {{ nameForSeat(currentTurnSeat) }} ({{ state.phase }})…</p>
@@ -735,6 +955,48 @@ function nodeClasses(territoryId: string) {
   background: radial-gradient(ellipse at 50% 40%, #1c2b45, #0f1524);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+  cursor: grab;
+  /* Own the pointer instead of letting the browser use it for native
+     page scroll/pinch-zoom while dragging/pinching on the map. */
+  touch-action: none;
+}
+
+.cb-map-panning {
+  cursor: grabbing;
+}
+
+.cb-zoom-controls {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.cb-zoom-btn {
+  width: 2.1rem;
+  height: 2.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 14, 26, 0.9);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.cb-zoom-btn:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.cb-zoom-reset {
+  font-size: 0.9rem;
 }
 
 .cb-trophies-float {
@@ -1071,6 +1333,11 @@ function nodeClasses(territoryId: string) {
 
 .cb-action p {
   margin: 0 0 0.4rem;
+}
+
+.cb-pass-btn {
+  width: 100%;
+  margin-top: 0.6rem;
 }
 
 .cb-attack-picker {

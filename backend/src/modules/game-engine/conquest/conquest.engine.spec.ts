@@ -318,10 +318,10 @@ describe('ConquestEngine', () => {
     });
 
     it('rejects fortifying when both ends are owned but no owned path connects them', () => {
-      // pearl_isle is seat 0's, but every one of its neighbors -- its only
-      // links back to the mainland -- belongs to seat 1, isolating it.
+      // pearl_isle is seat 0's, but its only neighbor (its sole link back
+      // to the mainland) belongs to seat 1, isolating it.
       const s = baseState(
-        { reefhaven: 1, saltmere: 1, whitepeak: 1 },
+        { reefhaven: 1, whitepeak: 1 },
         { icemark: 5 },
         { phase: 'fortify' },
       );
@@ -403,8 +403,8 @@ describe('ConquestEngine', () => {
 
   describe('continent bonus', () => {
     it('adds the continent bonus once a seat owns every territory in it', () => {
-      // Seat 0 owns only Oceania (6 territories, +3 bonus); seat 1 owns
-      // the other 36. Ending seat 1's turn hands seat 0 a fresh reinforce
+      // Seat 0 owns only Oceania (4 territories, +2 bonus); seat 1 owns
+      // the other 38. Ending seat 1's turn hands seat 0 a fresh reinforce
       // phase, so its reinforcementsRemaining reflects seat 0's bonus.
       const oceaniaOwner = Object.fromEntries(OCEANIA_TERRITORY_IDS.map((id) => [id, 0]));
       const s = baseState(
@@ -415,8 +415,8 @@ describe('ConquestEngine', () => {
       const move = engine.endTurn(asRecord(s), 1);
       const result = move.boardState as unknown as ConquestState;
       expect(result.currentTurnSeat).toBe(0);
-      // Base: max(3, floor(6/3)) = 3, plus Oceania's +3 bonus.
-      expect(result.reinforcementsRemaining).toBe(6);
+      // Base: max(3, floor(4/3)) = 3, plus Oceania's +2 bonus.
+      expect(result.reinforcementsRemaining).toBe(5);
     });
 
     it('does not award a bonus for a partially-held continent', () => {
@@ -429,8 +429,8 @@ describe('ConquestEngine', () => {
       );
       const move = engine.endTurn(asRecord(s), 1);
       const result = move.boardState as unknown as ConquestState;
-      // Only 5 Oceania territories owned, no continent completed -- just
-      // the base max(3, floor(5/3)) = 3, no +3 on top.
+      // Only 3 of 4 Oceania territories owned, no continent completed --
+      // just the base max(3, floor(3/3)) = 3, no +2 on top.
       expect(result.reinforcementsRemaining).toBe(3);
     });
   });
@@ -540,7 +540,7 @@ describe('ConquestEngine', () => {
       }
 
       it('trades a three-of-a-kind set for the first-trade-in bonus', () => {
-        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_snowvale')];
         const s = stateWithHand(hand);
         const { boardState, bonus } = engine.tradeInCards(
           asRecord(s),
@@ -634,7 +634,7 @@ describe('ConquestEngine', () => {
       });
 
       it('escalates the bonus based on how many sets have already been traded', () => {
-        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_snowvale')];
         const s = stateWithHand(hand, { cardsTradedInCount: 5 });
         const { bonus } = engine.tradeInCards(
           asRecord(s),

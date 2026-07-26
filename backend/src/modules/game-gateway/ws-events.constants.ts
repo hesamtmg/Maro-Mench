@@ -44,6 +44,7 @@ export const WS_EVENTS_IN = {
   CONQUEST_FORTIFY: 'conquest_fortify', // { roomId, fromId, toId, count }
   CONQUEST_END_TURN: 'conquest_end_turn', // { roomId }
   CONQUEST_TRADE_CARDS: 'conquest_trade_cards', // { roomId, cardIds: string[] }
+  CONQUEST_PASS_TURN: 'conquest_pass_turn', // { roomId } -- voluntary version of the timeout scheduler's force-end-turn
 } as const;
 
 // Server -> Client events

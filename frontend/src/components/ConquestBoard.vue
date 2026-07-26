@@ -159,6 +159,12 @@ const selectedCardIds = ref<string[]>([]);
 // bonuses/schedules.
 const trophiesOpen = ref(false);
 
+// The battle log and hand panels live in the sidebar (not over the map),
+// so they default open, but stay collapsible for anyone who wants a
+// tidier sidebar.
+const battleOpen = ref(true);
+const myCardsOpen = ref(true);
+
 function toggleCard(cardId: string) {
   const i = selectedCardIds.value.indexOf(cardId);
   if (i !== -1) {
@@ -608,74 +614,94 @@ function nodeClasses(territoryId: string) {
       </div>
 
       <div v-if="lastCombat" class="card cb-battle">
-        <h4 class="panel-title">
-          ⚔️ {{ TERRITORY_BY_ID[lastCombat.fromId]?.name }} vs
-          {{ TERRITORY_BY_ID[lastCombat.toId]?.name }}
-        </h4>
-        <div class="cb-battle-row">
-          <div class="cb-dice-group">
-            <span class="text-muted">Attacker</span>
-            <div class="row">
-              <DiceRoller
-                v-for="(d, i) in lastCombat.attackerDice"
-                :key="`a${i}`"
-                :value="d"
-                :is-rolling="rollingCombat"
-              />
+        <button
+          type="button"
+          class="cb-panel-toggle"
+          :aria-expanded="battleOpen"
+          @click="battleOpen = !battleOpen"
+        >
+          <h4 class="panel-title cb-panel-toggle-title">
+            ⚔️ {{ TERRITORY_BY_ID[lastCombat.fromId]?.name }} vs
+            {{ TERRITORY_BY_ID[lastCombat.toId]?.name }}
+          </h4>
+          <span class="cb-panel-toggle-chevron">{{ battleOpen ? "▾" : "▸" }}</span>
+        </button>
+        <template v-if="battleOpen">
+          <div class="cb-battle-row">
+            <div class="cb-dice-group">
+              <span class="text-muted">Attacker</span>
+              <div class="row">
+                <DiceRoller
+                  v-for="(d, i) in lastCombat.attackerDice"
+                  :key="`a${i}`"
+                  :value="d"
+                  :is-rolling="rollingCombat"
+                />
+              </div>
+            </div>
+            <div class="cb-dice-group">
+              <span class="text-muted">Defender</span>
+              <div class="row">
+                <DiceRoller
+                  v-for="(d, i) in lastCombat.defenderDice"
+                  :key="`d${i}`"
+                  :value="d"
+                  :is-rolling="rollingCombat"
+                />
+              </div>
             </div>
           </div>
-          <div class="cb-dice-group">
-            <span class="text-muted">Defender</span>
-            <div class="row">
-              <DiceRoller
-                v-for="(d, i) in lastCombat.defenderDice"
-                :key="`d${i}`"
-                :value="d"
-                :is-rolling="rollingCombat"
-              />
-            </div>
-          </div>
-        </div>
-        <p class="text-muted">
-          Attacker lost {{ lastCombat.attackerLosses }}, defender lost {{ lastCombat.defenderLosses }}.
-          <template v-if="lastCombat.captured">Territory captured!</template>
-        </p>
+          <p class="text-muted">
+            Attacker lost {{ lastCombat.attackerLosses }}, defender lost {{ lastCombat.defenderLosses }}.
+            <template v-if="lastCombat.captured">Territory captured!</template>
+          </p>
+        </template>
       </div>
 
       <div class="card cb-cards">
-        <h4 class="panel-title">Your Cards</h4>
-        <p v-if="myHand.length === 0" class="text-muted">
-          None yet -- capture a territory during your attack phase to draw one.
-        </p>
-        <div v-else class="cb-hand">
-          <button
-            v-for="c in myHand"
-            :key="c.id"
-            type="button"
-            class="cb-card"
-            :class="{ 'cb-card-selected': selectedCardIds.includes(c.id) }"
-            :disabled="!isMyTurn || state?.phase !== 'reinforce'"
-            @click="toggleCard(c.id)"
-          >
-            <span class="cb-card-icon">{{ CARD_SYMBOL_ICON[c.symbol] }}</span>
-            <span class="cb-card-name">{{ c.territoryId ? TERRITORY_BY_ID[c.territoryId]?.name : "Wild" }}</span>
-          </button>
-        </div>
         <button
-          v-if="isMyTurn && state?.phase === 'reinforce'"
-          class="btn btn-primary cb-trade-btn"
-          :disabled="!selectedSetIsValid"
-          @click="submitTradeCards"
+          type="button"
+          class="cb-panel-toggle"
+          :aria-expanded="myCardsOpen"
+          @click="myCardsOpen = !myCardsOpen"
         >
-          Trade for +{{ nextTradeBonus }}
+          <h4 class="panel-title cb-panel-toggle-title">Your Cards</h4>
+          <span class="cb-panel-toggle-chevron">{{ myCardsOpen ? "▾" : "▸" }}</span>
         </button>
-        <div v-if="players.length > 1" class="cb-opponent-cards">
-          <div v-for="p in players" :key="`cards-${p.userId}`" class="cb-opponent-card-row">
-            <span class="cb-legend-swatch" :style="{ background: p.color ?? '#999' }" />
-            {{ p.displayName }}
-            <span class="text-muted">🃏 {{ cardCountFor(p.seatIndex) }}</span>
+        <template v-if="myCardsOpen">
+          <p v-if="myHand.length === 0" class="text-muted">
+            None yet -- capture a territory during your attack phase to draw one.
+          </p>
+          <div v-else class="cb-hand">
+            <button
+              v-for="c in myHand"
+              :key="c.id"
+              type="button"
+              class="cb-card"
+              :class="{ 'cb-card-selected': selectedCardIds.includes(c.id) }"
+              :disabled="!isMyTurn || state?.phase !== 'reinforce'"
+              @click="toggleCard(c.id)"
+            >
+              <span class="cb-card-icon">{{ CARD_SYMBOL_ICON[c.symbol] }}</span>
+              <span class="cb-card-name">{{ c.territoryId ? TERRITORY_BY_ID[c.territoryId]?.name : "Wild" }}</span>
+            </button>
           </div>
-        </div>
+          <button
+            v-if="isMyTurn && state?.phase === 'reinforce'"
+            class="btn btn-primary cb-trade-btn"
+            :disabled="!selectedSetIsValid"
+            @click="submitTradeCards"
+          >
+            Trade for +{{ nextTradeBonus }}
+          </button>
+          <div v-if="players.length > 1" class="cb-opponent-cards">
+            <div v-for="p in players" :key="`cards-${p.userId}`" class="cb-opponent-card-row">
+              <span class="cb-legend-swatch" :style="{ background: p.color ?? '#999' }" />
+              {{ p.displayName }}
+              <span class="text-muted">🃏 {{ cardCountFor(p.seatIndex) }}</span>
+            </div>
+          </div>
+        </template>
       </div>
 
     </div>
@@ -950,6 +976,35 @@ function nodeClasses(territoryId: string) {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
+}
+
+.cb-panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cb-panel-toggle-title {
+  margin: 0;
+}
+
+.cb-panel-toggle-chevron {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.cb-panel-toggle:hover .cb-panel-toggle-title,
+.cb-panel-toggle:hover .cb-panel-toggle-chevron {
+  color: #ffd93d;
 }
 
 .cb-players {

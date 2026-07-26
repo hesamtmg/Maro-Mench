@@ -188,6 +188,89 @@ describe('ConquestEngine', () => {
     });
   });
 
+  describe('moveArmies', () => {
+    it('moves armies between two owned territories with no adjacency requirement', () => {
+      const state = baseState(
+        {},
+        { icemark: 3, stormatoll: 1 },
+        { phase: 'reinforce', reinforcementsRemaining: 0 },
+      );
+      const result = engine.moveArmies(
+        asRecord(state),
+        0,
+        'icemark',
+        'stormatoll',
+        2,
+      ) as unknown as ConquestState;
+      expect(result.armies.icemark).toBe(1);
+      expect(result.armies.stormatoll).toBe(3);
+    });
+
+    it('does not touch reinforcementsRemaining or the phase', () => {
+      const state = baseState(
+        {},
+        { icemark: 3, stormatoll: 1 },
+        { phase: 'reinforce', reinforcementsRemaining: 4 },
+      );
+      const result = engine.moveArmies(
+        asRecord(state),
+        0,
+        'icemark',
+        'stormatoll',
+        1,
+      ) as unknown as ConquestState;
+      expect(result.reinforcementsRemaining).toBe(4);
+      expect(result.phase).toBe('reinforce');
+    });
+
+    it('rejects leaving the source territory empty', () => {
+      const state = baseState(
+        {},
+        { icemark: 2 },
+        { phase: 'reinforce', reinforcementsRemaining: 0 },
+      );
+      expect(() => engine.moveArmies(asRecord(state), 0, 'icemark', 'stormatoll', 2)).toThrow(
+        'You must leave at least one army behind.',
+      );
+    });
+
+    it('rejects moving a territory to itself', () => {
+      const state = baseState({}, { icemark: 3 }, { phase: 'reinforce', reinforcementsRemaining: 0 });
+      expect(() => engine.moveArmies(asRecord(state), 0, 'icemark', 'icemark', 1)).toThrow(
+        'Pick two different territories.',
+      );
+    });
+
+    it('rejects moving from or to a territory you do not own', () => {
+      const state = baseState(
+        { stormatoll: 1 },
+        { icemark: 3 },
+        { phase: 'reinforce', reinforcementsRemaining: 0 },
+      );
+      expect(() => engine.moveArmies(asRecord(state), 0, 'icemark', 'stormatoll', 1)).toThrow(
+        'You do not own that territory.',
+      );
+    });
+
+    it('rejects moving outside the reinforce phase', () => {
+      const state = baseState({}, { icemark: 3 }, { phase: 'attack' });
+      expect(() => engine.moveArmies(asRecord(state), 0, 'icemark', 'stormatoll', 1)).toThrow(
+        'Not in the reinforce phase.',
+      );
+    });
+
+    it("rejects acting when it isn't your turn", () => {
+      const state = baseState(
+        {},
+        { icemark: 3 },
+        { phase: 'reinforce', reinforcementsRemaining: 0, currentTurnSeat: 1 },
+      );
+      expect(() => engine.moveArmies(asRecord(state), 0, 'icemark', 'stormatoll', 1)).toThrow(
+        'It is not your turn.',
+      );
+    });
+  });
+
   describe('attack', () => {
     it('attacker wins both dice: defender loses 2 armies', () => {
       const s = baseState({ sunset_bay: 1 }, { icemark: 4, sunset_bay: 2 });

@@ -288,6 +288,38 @@ export class ConquestEngine implements GameEngine {
     return state as unknown as Record<string, unknown>;
   }
 
+  /**
+   * Freely repositions armies between two territories the player already
+   * owns, during the reinforce phase only -- no adjacency or connected-path
+   * requirement (unlike fortify, which is limited to one adjacent-ish move
+   * per turn after attacking). At least one army must stay behind so a
+   * territory is never left empty.
+   */
+  moveArmies(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    fromId: string,
+    toId: string,
+    count: number,
+  ): Record<string, unknown> {
+    const state = cloneState(boardStateIn as unknown as ConquestState);
+    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
+    if (state.phase !== 'reinforce') throw new Error('Not in the reinforce phase.');
+    if (fromId === toId) throw new Error('Pick two different territories.');
+    if (state.owner[fromId] !== seatIndex || state.owner[toId] !== seatIndex) {
+      throw new Error('You do not own that territory.');
+    }
+    if (count < 1) throw new Error('Must move at least one army.');
+    if (count > state.armies[fromId] - 1) {
+      throw new Error('You must leave at least one army behind.');
+    }
+
+    state.armies[fromId] -= count;
+    state.armies[toId] += count;
+
+    return state as unknown as Record<string, unknown>;
+  }
+
   /** Resolves one attack roll from `fromId` into the adjacent enemy `toId`. */
   attack(
     boardStateIn: Record<string, unknown>,

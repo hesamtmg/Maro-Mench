@@ -25,6 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   reinforce: [territoryId: string, count: number];
+  "move-armies": [fromId: string, toId: string, count: number];
   attack: [fromId: string, toId: string, diceCount: number];
   "end-attack-phase": [];
   fortify: [fromId: string, toId: string, count: number];
@@ -439,6 +440,9 @@ const fortifyCount = ref(1);
 function clearSelection() {
   selectedFrom.value = null;
   selectedTo.value = null;
+  moveFromId.value = null;
+  moveToId.value = null;
+  moveCount.value = 1;
 }
 
 // Reset whenever the phase changes out from under a stale selection.
@@ -462,6 +466,52 @@ const maxFortifyCount = computed(() => {
 watch(maxFortifyCount, (max) => {
   if (fortifyCount.value > max) fortifyCount.value = max;
 });
+
+// --- Reinforce-phase free army movement ---
+// Unlike fortify (once per turn, after attacking), this lets a player
+// reposition armies between any two territories they own -- no adjacency
+// or connected-path requirement -- as many times as they like while still
+// in the reinforce phase.
+const moveFromId = ref<string | null>(null);
+const moveToId = ref<string | null>(null);
+const moveCount = ref(1);
+
+const myOwnedTerritories = computed(() => {
+  const s = state.value;
+  const seat = props.mySeatIndex;
+  if (!s || seat == null) return [];
+  return TERRITORIES.filter((t) => s.owner[t.id] === seat).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+});
+
+const moveFromMaxCount = computed(() => {
+  if (!moveFromId.value) return 1;
+  return Math.max(1, armiesOn(moveFromId.value) - 1);
+});
+watch(moveFromMaxCount, (max) => {
+  if (moveCount.value > max) moveCount.value = max;
+});
+watch(moveFromId, (id) => {
+  if (id && moveToId.value === id) moveToId.value = null;
+  moveCount.value = 1;
+});
+
+const canMoveArmies = computed(
+  () =>
+    !!moveFromId.value &&
+    !!moveToId.value &&
+    moveFromId.value !== moveToId.value &&
+    armiesOn(moveFromId.value) > 1
+);
+
+function submitMoveArmies() {
+  if (!canMoveArmies.value || !moveFromId.value || !moveToId.value) return;
+  emit("move-armies", moveFromId.value, moveToId.value, moveCount.value);
+  moveFromId.value = null;
+  moveToId.value = null;
+  moveCount.value = 1;
+}
 
 const attackableTargets = computed(() => {
   if (state.value?.phase !== "attack" || !selectedFrom.value) return new Set<string>();
@@ -780,6 +830,46 @@ function nodeClasses(territoryId: string) {
             Includes +{{ myContinentBonus.total }} for holding
             {{ myContinentBonus.continents.map((c) => c.name).join(", ") }}
           </p>
+
+          <div class="cb-move-armies">
+            <p class="cb-move-armies-title">
+              <strong>Move armies</strong>
+              <span class="text-muted"> -- reposition troops anywhere on the map</span>
+            </p>
+            <div class="row cb-move-armies-row">
+              <select v-model="moveFromId" class="cb-move-select">
+                <option :value="null" disabled>From territory</option>
+                <option v-for="t in myOwnedTerritories" :key="t.id" :value="t.id">
+                  {{ t.name }} ({{ armiesOn(t.id) }})
+                </option>
+              </select>
+              <select v-model="moveToId" class="cb-move-select">
+                <option :value="null" disabled>To territory</option>
+                <option
+                  v-for="t in myOwnedTerritories"
+                  :key="t.id"
+                  :value="t.id"
+                  :disabled="t.id === moveFromId"
+                >
+                  {{ t.name }} ({{ armiesOn(t.id) }})
+                </option>
+              </select>
+              <input
+                v-model.number="moveCount"
+                type="number"
+                min="1"
+                :max="moveFromMaxCount"
+                class="cb-move-count"
+              />
+              <button
+                class="btn btn-secondary"
+                :disabled="!canMoveArmies"
+                @click="submitMoveArmies"
+              >
+                Move
+              </button>
+            </div>
+          </div>
         </template>
 
         <template v-else-if="state?.phase === 'attack'">
@@ -1338,6 +1428,30 @@ function nodeClasses(territoryId: string) {
 .cb-pass-btn {
   width: 100%;
   margin-top: 0.6rem;
+}
+
+.cb-move-armies {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cb-move-armies-title {
+  margin-bottom: 0.4rem;
+}
+
+.cb-move-armies-row {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cb-move-select {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.cb-move-count {
+  width: 3.5rem;
 }
 
 .cb-attack-picker {

@@ -445,7 +445,7 @@ function nodeClasses(territoryId: string) {
           <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
           <!-- Alternating vertical offset breaks label collisions between
                neighbors that happen to share almost the same y (a few real
-               -world clusters, e.g. Ironridge/Cragmoor, do). -->
+               -world clusters, e.g. Etruria/Illyria, do). -->
           <text x="0" :y="nodeIndex % 2 === 0 ? -13 : -10.5" class="cb-node-label">{{ node.name }}</text>
         </g>
 

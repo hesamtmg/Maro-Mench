@@ -223,6 +223,18 @@ const edgeLines = computed(() =>
   }))
 );
 
+// One bonus badge per continent, floated just above that continent's
+// northernmost territory (average x across its territories, so it centers
+// over the landmass rather than sitting on any one node).
+const continentLabelPositions = computed(() =>
+  CONTINENTS.map((c) => {
+    const members = TERRITORIES.filter((t) => t.continentId === c.id);
+    const avgX = members.reduce((sum, t) => sum + t.x, 0) / members.length;
+    const minY = Math.min(...members.map((t) => t.y));
+    return { ...c, x: avgX, y: minY - 20 };
+  })
+);
+
 // --- Selection / interaction ---
 
 const selectedFrom = ref<string | null>(null);
@@ -358,6 +370,7 @@ function nodeClasses(territoryId: string) {
 <template>
   <div class="conquest-wrap">
     <div class="conquest-main">
+      <div class="cb-map-wrap">
       <svg
         class="conquest-map"
         :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
@@ -424,7 +437,65 @@ function nodeClasses(territoryId: string) {
                -world clusters, e.g. Ironridge/Cragmoor, do). -->
           <text x="0" :y="nodeIndex % 2 === 0 ? -13 : -10.5" class="cb-node-label">{{ node.name }}</text>
         </g>
+
+        <!-- Continent bonus badges, floated above each landmass. -->
+        <g
+          v-for="c in continentLabelPositions"
+          :key="`badge-${c.id}`"
+          :transform="`translate(${c.x}, ${c.y})`"
+          class="cb-continent-badge"
+        >
+          <rect x="-15" y="-8" width="30" height="16" rx="4" :fill="CONTINENT_COLORS[c.id]" />
+          <text x="0" y="4" class="cb-continent-badge-text">+{{ c.bonus }}</text>
+        </g>
       </svg>
+
+      <div v-if="state" class="cb-trophies-float">
+        <h4 class="panel-title">🏆 Trophies</h4>
+
+        <p class="cb-trophies-subtitle">Continents -- own every territory for the bonus</p>
+        <table class="cb-table">
+          <thead>
+            <tr>
+              <th>Continent</th>
+              <th>Terr.</th>
+              <th>Bonus</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in CONTINENTS" :key="c.id">
+              <td class="cb-table-continent">
+                <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
+                {{ c.name }}
+              </td>
+              <td>{{ territoryCountForContinent(c.id) }}</td>
+              <td>+{{ c.bonus }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="cb-trophies-subtitle">Card sets -- trade in 3 for a growing bonus</p>
+        <table class="cb-table">
+          <thead>
+            <tr>
+              <th>Set #</th>
+              <th>Bonus</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="n in 7"
+              :key="n"
+              :class="{ 'cb-table-next': state?.cardsTradedInCount === n - 1 }"
+            >
+              <td>{{ n }}{{ ordinalSuffix(n) }}</td>
+              <td>+{{ previewTradeBonus(n - 1) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-muted cb-trophies-note">Every set after the 6th is worth +5 more than the last.</p>
+      </div>
+      </div>
 
       <div v-if="state" class="cb-status-bar">
         <span class="cb-status-dot" :style="{ background: playerColor(currentTurnSeat) }" />
@@ -592,51 +663,6 @@ function nodeClasses(territoryId: string) {
         </div>
       </div>
 
-      <div class="card cb-trophies">
-        <h4 class="panel-title">🏆 Trophies</h4>
-
-        <p class="cb-trophies-subtitle">Continents -- own every territory for the bonus</p>
-        <table class="cb-table">
-          <thead>
-            <tr>
-              <th>Continent</th>
-              <th>Territories</th>
-              <th>Bonus</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in CONTINENTS" :key="c.id">
-              <td class="cb-table-continent">
-                <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
-                {{ c.name }}
-              </td>
-              <td>{{ territoryCountForContinent(c.id) }}</td>
-              <td>+{{ c.bonus }}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <p class="cb-trophies-subtitle">Card sets -- trade in 3 for a growing bonus</p>
-        <table class="cb-table">
-          <thead>
-            <tr>
-              <th>Set #</th>
-              <th>Bonus</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="n in 7"
-              :key="n"
-              :class="{ 'cb-table-next': state?.cardsTradedInCount === n - 1 }"
-            >
-              <td>{{ n }}{{ ordinalSuffix(n) }}</td>
-              <td>+{{ previewTradeBonus(n - 1) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="text-muted cb-trophies-note">Every set after the 6th is worth +5 more than the last.</p>
-      </div>
     </div>
   </div>
 </template>
@@ -650,12 +676,16 @@ function nodeClasses(territoryId: string) {
 }
 
 .conquest-main {
-  flex: 1 1 560px;
+  flex: 1 1 680px;
   min-width: 280px;
-  max-width: 760px;
+  max-width: 920px;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+}
+
+.cb-map-wrap {
+  position: relative;
 }
 
 .conquest-map {
@@ -664,6 +694,22 @@ function nodeClasses(territoryId: string) {
   background: radial-gradient(ellipse at 50% 40%, #1c2b45, #0f1524);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+}
+
+.cb-trophies-float {
+  position: absolute;
+  left: 0.6rem;
+  bottom: 0.6rem;
+  width: 17rem;
+  max-height: 88%;
+  overflow-y: auto;
+  padding: 0.6rem 0.7rem;
+  background: rgba(10, 14, 26, 0.9);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(2px);
+  font-size: 0.76rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 .cb-landmass {
@@ -765,6 +811,26 @@ function nodeClasses(territoryId: string) {
 .cb-node-target .cb-node-label {
   opacity: 1;
   font-size: 9px;
+}
+
+.cb-continent-badge {
+  pointer-events: none;
+}
+
+.cb-continent-badge rect {
+  stroke: rgba(0, 0, 0, 0.5);
+  stroke-width: 1;
+  fill-opacity: 0.9;
+}
+
+.cb-continent-badge-text {
+  font-size: 10px;
+  font-weight: 800;
+  fill: #fff;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 1.5;
 }
 
 .cb-status-bar {
@@ -937,10 +1003,6 @@ function nodeClasses(territoryId: string) {
   font-size: 0.72rem;
 }
 
-.cb-trophies {
-  font-size: 0.78rem;
-}
-
 .cb-trophies-subtitle {
   margin: 0.6rem 0 0.3rem;
   font-size: 0.7rem;
@@ -958,8 +1020,14 @@ function nodeClasses(territoryId: string) {
 
 .cb-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.75rem;
+}
+
+.cb-table th:first-child,
+.cb-table td:first-child {
+  width: 46%;
 }
 
 .cb-table th {
@@ -1087,6 +1155,17 @@ function nodeClasses(territoryId: string) {
 @media (max-width: 640px) {
   .cb-node-label {
     font-size: 6px;
+  }
+
+  .cb-trophies-float {
+    width: 12rem;
+    max-height: 78%;
+    font-size: 0.6rem;
+    padding: 0.4rem 0.45rem;
+  }
+
+  .cb-continent-badge-text {
+    font-size: 8px;
   }
 }
 </style>

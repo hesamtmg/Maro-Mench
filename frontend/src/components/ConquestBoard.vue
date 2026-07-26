@@ -179,6 +179,24 @@ const selectedSetIsValid = computed(() => {
 
 const nextTradeBonus = computed(() => previewTradeBonus(state.value?.cardsTradedInCount ?? 0));
 
+function territoryCountForContinent(continentId: string): number {
+  return TERRITORIES.filter((t) => t.continentId === continentId).length;
+}
+
+function ordinalSuffix(n: number): string {
+  if (n % 100 >= 11 && n % 100 <= 13) return "th";
+  switch (n % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
 function submitTradeCards() {
   if (!selectedSetIsValid.value) return;
   emit("trade-cards", [...selectedCardIds.value]);
@@ -574,13 +592,50 @@ function nodeClasses(territoryId: string) {
         </div>
       </div>
 
-      <div class="card cb-legend">
-        <h4 class="panel-title">Continents</h4>
-        <div v-for="c in CONTINENTS" :key="c.id" class="cb-legend-row">
-          <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
-          {{ c.name }}
-          <span class="text-muted">+{{ c.bonus }}</span>
-        </div>
+      <div class="card cb-trophies">
+        <h4 class="panel-title">🏆 Trophies</h4>
+
+        <p class="cb-trophies-subtitle">Continents -- own every territory for the bonus</p>
+        <table class="cb-table">
+          <thead>
+            <tr>
+              <th>Continent</th>
+              <th>Territories</th>
+              <th>Bonus</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in CONTINENTS" :key="c.id">
+              <td class="cb-table-continent">
+                <span class="cb-legend-swatch" :style="{ background: CONTINENT_COLORS[c.id] }" />
+                {{ c.name }}
+              </td>
+              <td>{{ territoryCountForContinent(c.id) }}</td>
+              <td>+{{ c.bonus }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="cb-trophies-subtitle">Card sets -- trade in 3 for a growing bonus</p>
+        <table class="cb-table">
+          <thead>
+            <tr>
+              <th>Set #</th>
+              <th>Bonus</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="n in 7"
+              :key="n"
+              :class="{ 'cb-table-next': state?.cardsTradedInCount === n - 1 }"
+            >
+              <td>{{ n }}{{ ordinalSuffix(n) }}</td>
+              <td>+{{ previewTradeBonus(n - 1) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-muted cb-trophies-note">Every set after the 6th is worth +5 more than the last.</p>
       </div>
     </div>
   </div>
@@ -878,23 +933,63 @@ function nodeClasses(territoryId: string) {
   gap: 0.3rem;
 }
 
-.cb-legend {
+.cb-bonus-note {
+  font-size: 0.72rem;
+}
+
+.cb-trophies {
   font-size: 0.78rem;
 }
 
-.cb-legend-row {
+.cb-trophies-subtitle {
+  margin: 0.6rem 0 0.3rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.cb-trophies-subtitle:first-of-type {
+  margin-top: 0;
+}
+
+.cb-trophies-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.68rem;
+}
+
+.cb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.cb-table th {
+  text-align: left;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cb-table td {
+  padding: 0.25rem 0.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cb-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.cb-table-continent {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.1rem 0;
 }
 
-.cb-legend-row .text-muted {
-  margin-left: auto;
-}
-
-.cb-bonus-note {
-  font-size: 0.72rem;
+.cb-table-next td {
+  background: rgba(255, 217, 61, 0.12);
+  font-weight: 700;
 }
 
 .cb-legend-swatch {

@@ -208,3 +208,31 @@ export const STARTING_ARMIES_BY_PLAYER_COUNT: Record<number, number> = {
   5: 25,
   6: 20,
 };
+
+// Territory cards -- generic military-unit symbols (infantry/cavalry/
+// artillery), not Risk-specific terminology or art. One card per
+// territory plus two wildcards, symbols assigned round-robin so all 42
+// territories split evenly (14 each) across the three symbols.
+export type CardSymbol = 'infantry' | 'cavalry' | 'artillery' | 'wild';
+
+export interface CardDef {
+  id: string;
+  territoryId: string | null;
+  symbol: CardSymbol;
+}
+
+const CARD_SYMBOLS: readonly CardSymbol[] = ['infantry', 'cavalry', 'artillery'];
+
+export const CARD_DECK: CardDef[] = [
+  ...TERRITORIES.map((t, i) => ({
+    id: `card_${t.id}`,
+    territoryId: t.id,
+    symbol: CARD_SYMBOLS[i % 3],
+  })),
+  { id: 'card_wild_1', territoryId: null, symbol: 'wild' as const },
+  { id: 'card_wild_2', territoryId: null, symbol: 'wild' as const },
+];
+
+export const CARD_BY_ID: Record<string, CardDef> = Object.fromEntries(
+  CARD_DECK.map((c) => [c.id, c]),
+);

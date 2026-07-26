@@ -1159,6 +1159,41 @@ export class GameGateway
     }
   }
 
+  /** Conquest-only: trades in a matched set of 3 cards for reinforcements during the reinforce phase. Doesn't consume the turn. */
+  @SubscribeMessage(WS_EVENTS_IN.CONQUEST_TRADE_CARDS)
+  async onConquestTradeCards(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() payload: { roomId: string; cardIds: string[] },
+  ) {
+    const room = await this.roomsService.findRoomOrThrow(payload.roomId);
+    const player = room.players.find((p) => p.userId === socket.data.userId);
+    if (this.rejectIfPaused(socket, room.id)) return;
+    const gameState = await this.gameStateService.getGameState(room.id);
+
+    if (!player || player.seatIndex !== gameState.currentTurnSeat) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: 'It is not your turn' });
+      return;
+    }
+
+    try {
+      const { boardState, bonus, territoryBonusId } = this.conquestEngine.tradeInCards(
+        gameState.boardState,
+        player.seatIndex,
+        payload.cardIds,
+      );
+      await this.gameStateService.updateGameState(gameState, { boardState });
+      this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
+        boardState,
+        seatIndex: player.seatIndex,
+        tradedIn: true,
+        bonus,
+        territoryBonusId,
+      });
+    } catch (err) {
+      socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
+    }
+  }
+
   /** Conquest-only: moves armies once between owned, connected territories, ending the turn. */
   @SubscribeMessage(WS_EVENTS_IN.CONQUEST_FORTIFY)
   async onConquestFortify(

@@ -217,6 +217,9 @@ interface ConquestStateUpdatedEvent {
   reinforced?: string;
   count?: number;
   movedToFortify?: boolean;
+  tradedIn?: boolean;
+  bonus?: number;
+  territoryBonusId?: string | null;
 }
 
 interface ConquestAttackResultEvent {
@@ -230,6 +233,12 @@ function conquestStateEventMessage(
   room: Room | null,
 ): string | null {
   const name = payload.seatIndex != null ? displayNameForSeat(room, payload.seatIndex) : 'A player';
+  if (payload.tradedIn) {
+    const bonusNote = payload.territoryBonusId
+      ? ` (+2 more on ${TERRITORY_BY_ID[payload.territoryBonusId]?.name ?? payload.territoryBonusId})`
+      : '';
+    return `🃏 ${name} traded in a set for +${payload.bonus} armies${bonusNote}.`;
+  }
   if (payload.reinforced) return `🪖 ${name} placed ${payload.count} army/armies on ${payload.reinforced}.`;
   if (payload.movedToFortify) return `⏭️ ${name} moved to the fortify phase.`;
   return null;
@@ -469,6 +478,10 @@ export const useRoomStore = defineStore('room', {
 
         if (isConquest) {
           this.pushEvent(conquestMoveMessage(name, movePayload), 'info', 2500);
+          if (movePayload.drewCard) {
+            this.pushEvent(`🃏 ${name} drew a card.`, 'info', 2500);
+            playCardFlip();
+          }
         } else if (isMonopoly) {
           const die1 = movePayload.die1 as number | undefined;
           const die2 = movePayload.die2 as number | undefined;
@@ -624,6 +637,7 @@ export const useRoomStore = defineStore('room', {
           if (message) {
             this.pushEvent(message, 'info', 2500);
             if (payload.reinforced) playHammerTap();
+            if (payload.tradedIn) playCardFlip();
           }
         },
       );
@@ -798,6 +812,10 @@ export const useRoomStore = defineStore('room', {
 
     conquestEndTurn(roomId: string) {
       getSocket().emit(WS_EVENTS_IN.CONQUEST_END_TURN, { roomId });
+    },
+
+    conquestTradeCards(roomId: string, cardIds: string[]) {
+      getSocket().emit(WS_EVENTS_IN.CONQUEST_TRADE_CARDS, { roomId, cardIds });
     },
 
     kickPlayer(roomId: string, targetUserId: string) {

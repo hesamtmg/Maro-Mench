@@ -191,3 +191,30 @@ export const EDGE_LIST: Array<[string, string]> = EDGES;
 export function areAdjacent(a: string, b: string): boolean {
   return ADJACENCY[a]?.includes(b) ?? false;
 }
+
+// Mirrors backend's CARD_DECK exactly -- one card per territory plus two
+// wildcards, symbols assigned round-robin so all 42 territories split
+// evenly (14 each) across the three generic military-unit symbols.
+export type CardSymbol = 'infantry' | 'cavalry' | 'artillery' | 'wild';
+
+export interface CardDef {
+  id: string;
+  territoryId: string | null;
+  symbol: CardSymbol;
+}
+
+const CARD_SYMBOLS: readonly CardSymbol[] = ['infantry', 'cavalry', 'artillery'];
+
+export const CARD_DECK: CardDef[] = [
+  ...TERRITORIES.map((t, i) => ({
+    id: `card_${t.id}`,
+    territoryId: t.id,
+    symbol: CARD_SYMBOLS[i % 3],
+  })),
+  { id: 'card_wild_1', territoryId: null, symbol: 'wild' as const },
+  { id: 'card_wild_2', territoryId: null, symbol: 'wild' as const },
+];
+
+export const CARD_BY_ID: Record<string, CardDef> = Object.fromEntries(
+  CARD_DECK.map((c) => [c.id, c]),
+);

@@ -43,6 +43,7 @@ export const WS_EVENTS_IN = {
   CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase', // { roomId }
   CONQUEST_FORTIFY: 'conquest_fortify', // { roomId, fromId, toId, count }
   CONQUEST_END_TURN: 'conquest_end_turn', // { roomId }
+  CONQUEST_TRADE_CARDS: 'conquest_trade_cards', // { roomId, cardIds: string[] }
 } as const;
 
 // Server -> Client events

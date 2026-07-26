@@ -1,6 +1,17 @@
 import { ConquestEngine, ConquestState, CombatResult } from './conquest.engine';
 import { RoomPlayerSeat } from '../game-engine.interface';
-import { TERRITORIES, STARTING_ARMIES_BY_PLAYER_COUNT } from './board-config';
+import {
+  CARD_BY_ID,
+  STARTING_ARMIES_BY_PLAYER_COUNT,
+  TERRITORIES,
+  type CardDef,
+} from './board-config';
+
+function card(id: string): CardDef {
+  const c = CARD_BY_ID[id];
+  if (!c) throw new Error(`No such card fixture: ${id}`);
+  return c;
+}
 
 const OCEANIA_TERRITORY_IDS = TERRITORIES.filter((t) => t.continentId === 'oceania').map(
   (t) => t.id,
@@ -39,6 +50,11 @@ function baseState(
     currentTurnSeat: 0,
     phase: 'attack',
     reinforcementsRemaining: 0,
+    deck: [],
+    discard: [],
+    hands: { 0: [], 1: [] },
+    cardsTradedInCount: 0,
+    capturedTerritoryThisTurn: false,
     ...stateOverrides,
   };
 }
@@ -85,6 +101,15 @@ describe('ConquestEngine', () => {
       expect(state.phase).toBe('reinforce');
       const owned = Object.values(state.owner).filter((s) => s === 0).length;
       expect(state.reinforcementsRemaining).toBe(Math.max(3, Math.floor(owned / 3)));
+    });
+
+    it('deals a full shuffled 44-card deck and empty hands to start', () => {
+      const state = engine.createInitialState(seats) as unknown as ConquestState;
+      expect(state.deck).toHaveLength(TERRITORIES.length + 2);
+      expect(state.discard).toEqual([]);
+      expect(state.hands).toEqual({ 0: [], 1: [] });
+      expect(state.cardsTradedInCount).toBe(0);
+      expect(state.capturedTerritoryThisTurn).toBe(false);
     });
 
     it('splits territories across more than two seats too', () => {
@@ -407,6 +432,245 @@ describe('ConquestEngine', () => {
       // Only 5 Oceania territories owned, no continent completed -- just
       // the base max(3, floor(5/3)) = 3, no +3 on top.
       expect(result.reinforcementsRemaining).toBe(3);
+    });
+  });
+
+  describe('cards', () => {
+    it('flags capturedTerritoryThisTurn when an attack captures a territory', () => {
+      const s = baseState({ sunset_bay: 1 }, { icemark: 4, sunset_bay: 2 });
+      mockRolls(6, 5, 2, 1);
+      const { boardState } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 2);
+      const result = boardState as unknown as ConquestState;
+      expect(result.capturedTerritoryThisTurn).toBe(true);
+    });
+
+    it('does not flag capturedTerritoryThisTurn on a failed attack', () => {
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 2 });
+      mockRolls(4, 4);
+      const { boardState } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
+      const result = boardState as unknown as ConquestState;
+      expect(result.capturedTerritoryThisTurn).toBe(false);
+    });
+
+    it('draws a card when ending a turn that captured a territory', () => {
+      const drawn = card('card_icemark');
+      const s = baseState(
+        {},
+        {},
+        { phase: 'fortify', capturedTerritoryThisTurn: true, deck: [drawn] },
+      );
+      const move = engine.endTurn(asRecord(s), 0);
+      const result = move.boardState as unknown as ConquestState;
+      expect(result.hands[0]).toEqual([drawn]);
+      expect(result.deck).toEqual([]);
+      expect(result.capturedTerritoryThisTurn).toBe(false);
+      expect(move.movePayload.drewCard).toEqual(drawn);
+    });
+
+    it('does not draw a card when ending a turn with no capture', () => {
+      const s = baseState(
+        {},
+        {},
+        { phase: 'fortify', capturedTerritoryThisTurn: false, deck: [card('card_icemark')] },
+      );
+      const move = engine.endTurn(asRecord(s), 0);
+      const result = move.boardState as unknown as ConquestState;
+      expect(result.hands[0]).toEqual([]);
+      expect(result.deck).toHaveLength(1);
+      expect(move.movePayload.drewCard).toBeNull();
+    });
+
+    it('reshuffles the discard pile back into the deck once it runs dry', () => {
+      const discardedCards = [card('card_icemark'), card('card_glacier_reach')];
+      const s = baseState(
+        {},
+        {},
+        { phase: 'fortify', capturedTerritoryThisTurn: true, deck: [], discard: discardedCards },
+      );
+      const move = engine.endTurn(asRecord(s), 0);
+      const result = move.boardState as unknown as ConquestState;
+      expect(result.hands[0]).toHaveLength(1);
+      expect(result.discard).toEqual([]);
+      // One of the two reshuffled cards was drawn, leaving the other in the deck.
+      expect(result.deck).toHaveLength(1);
+      expect([...result.hands[0], ...result.deck].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+        [...discardedCards].sort((a, b) => a.id.localeCompare(b.id)),
+      );
+    });
+
+    it('hands the eliminated seat their cards over to the eliminator', () => {
+      const eliminatedHand = [card('card_snowvale'), card('card_whitepeak')];
+      const s = baseState(
+        { sunset_bay: 1 },
+        { icemark: 3, sunset_bay: 1 },
+        { hands: { 0: [card('card_icemark')], 1: eliminatedHand } },
+      );
+      mockRolls(6, 1);
+      const { boardState } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
+      const result = boardState as unknown as ConquestState;
+      expect(result.hands[1]).toEqual([]);
+      expect(result.hands[0]).toEqual([card('card_icemark'), ...eliminatedHand]);
+    });
+
+    it('rejects placing reinforcements once a seat holds 5 or more cards', () => {
+      const hand = [
+        card('card_icemark'),
+        card('card_glacier_reach'),
+        card('card_frozen_cape'),
+        card('card_tundrafall'),
+        card('card_whitepeak'),
+      ];
+      const s = baseState(
+        {},
+        {},
+        { phase: 'reinforce', reinforcementsRemaining: 3, hands: { 0: hand, 1: [] } },
+      );
+      expect(() => engine.reinforce(asRecord(s), 0, 'icemark', 1)).toThrow(
+        'You have 5 or more cards -- trade in a set before placing reinforcements.',
+      );
+    });
+
+    describe('tradeInCards', () => {
+      function stateWithHand(hand: CardDef[], overrides: Partial<ConquestState> = {}) {
+        return baseState(
+          {},
+          {},
+          { phase: 'reinforce', reinforcementsRemaining: 2, hands: { 0: hand, 1: [] }, ...overrides },
+        );
+      }
+
+      it('trades a three-of-a-kind set for the first-trade-in bonus', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const s = stateWithHand(hand);
+        const { boardState, bonus } = engine.tradeInCards(
+          asRecord(s),
+          0,
+          hand.map((c) => c.id),
+        );
+        const result = boardState as unknown as ConquestState;
+        expect(bonus).toBe(4);
+        expect(result.reinforcementsRemaining).toBe(2 + 4);
+        expect(result.cardsTradedInCount).toBe(1);
+        expect(result.hands[0]).toEqual([]);
+        expect(result.discard).toEqual(expect.arrayContaining(hand));
+      });
+
+      it('trades a one-of-each set', () => {
+        const hand = [card('card_icemark'), card('card_glacier_reach'), card('card_frozen_cape')];
+        const s = stateWithHand(hand);
+        const { bonus } = engine.tradeInCards(
+          asRecord(s),
+          0,
+          hand.map((c) => c.id),
+        );
+        expect(bonus).toBe(4);
+      });
+
+      it('accepts a set filled out with a wildcard', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_wild_1')];
+        const s = stateWithHand(hand);
+        const { bonus } = engine.tradeInCards(
+          asRecord(s),
+          0,
+          hand.map((c) => c.id),
+        );
+        expect(bonus).toBe(4);
+      });
+
+      it('rejects a mismatched set (two of one symbol, one of another)', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_glacier_reach')];
+        const s = stateWithHand(hand);
+        expect(() =>
+          engine.tradeInCards(
+            asRecord(s),
+            0,
+            hand.map((c) => c.id),
+          ),
+        ).toThrow('Those cards are not a valid set');
+      });
+
+      it('rejects trading in cards not held', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const s = stateWithHand(hand);
+        expect(() =>
+          engine.tradeInCards(asRecord(s), 0, ['card_icemark', 'card_tundrafall', 'card_snowvale']),
+        ).toThrow('You do not hold one of those cards.');
+      });
+
+      it('rejects a count other than 3', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall')];
+        const s = stateWithHand(hand);
+        expect(() =>
+          engine.tradeInCards(
+            asRecord(s),
+            0,
+            hand.map((c) => c.id),
+          ),
+        ).toThrow('Trade in exactly 3 cards.');
+      });
+
+      it('rejects trading outside the reinforce phase', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const s = stateWithHand(hand, { phase: 'attack' });
+        expect(() =>
+          engine.tradeInCards(
+            asRecord(s),
+            0,
+            hand.map((c) => c.id),
+          ),
+        ).toThrow('You can only trade in cards during the reinforce phase.');
+      });
+
+      it("rejects acting when it isn't your turn", () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const s = stateWithHand(hand, { currentTurnSeat: 1 });
+        expect(() =>
+          engine.tradeInCards(
+            asRecord(s),
+            0,
+            hand.map((c) => c.id),
+          ),
+        ).toThrow('It is not your turn.');
+      });
+
+      it('escalates the bonus based on how many sets have already been traded', () => {
+        const hand = [card('card_icemark'), card('card_tundrafall'), card('card_coldharbor')];
+        const s = stateWithHand(hand, { cardsTradedInCount: 5 });
+        const { bonus } = engine.tradeInCards(
+          asRecord(s),
+          0,
+          hand.map((c) => c.id),
+        );
+        // TRADE_IN_BASE_BONUSES = [4,6,8,10,12,15] -- index 5 is the last
+        // scripted value (15); the 7th trade-in (index 6) would be 20.
+        expect(bonus).toBe(15);
+      });
+
+      it('awards +2 armies directly on a traded territory the seat still owns', () => {
+        const hand = [card('card_icemark'), card('card_glacier_reach'), card('card_frozen_cape')];
+        const s = stateWithHand(hand, { armies: { ...baseState().armies, icemark: 3 } });
+        const { boardState, territoryBonusId } = engine.tradeInCards(
+          asRecord(s),
+          0,
+          hand.map((c) => c.id),
+        );
+        const result = boardState as unknown as ConquestState;
+        expect(territoryBonusId).toBe('icemark');
+        expect(result.armies.icemark).toBe(3 + 2);
+      });
+
+      it('awards no territory bonus when none of the traded territories are owned', () => {
+        const hand = [card('card_icemark'), card('card_glacier_reach'), card('card_frozen_cape')];
+        const s = stateWithHand(hand, {
+          owner: { ...baseState().owner, icemark: 1, glacier_reach: 1, frozen_cape: 1 },
+        });
+        const { territoryBonusId } = engine.tradeInCards(
+          asRecord(s),
+          0,
+          hand.map((c) => c.id),
+        );
+        expect(territoryBonusId).toBeNull();
+      });
     });
   });
 });

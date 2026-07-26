@@ -8,6 +8,7 @@ import {
   TERRITORIES,
   TERRITORY_BY_ID,
   areAdjacent,
+  type CardDef,
 } from "./conquest/board-config";
 import { CONTINENT_PATHS } from "./conquest/continent-paths";
 import type { RoomPlayer } from "../types";
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   "end-attack-phase": [];
   fortify: [fromId: string, toId: string, count: number];
   "end-turn": [];
+  "trade-cards": [cardIds: string[]];
 }>();
 
 interface ConquestPlayerState {
@@ -42,7 +44,26 @@ interface ConquestStateShape {
   currentTurnSeat: number;
   phase: "reinforce" | "attack" | "fortify";
   reinforcementsRemaining: number;
+  hands: Record<number, CardDef[]>;
+  cardsTradedInCount: number;
 }
+
+// Client-side mirror of the backend's escalating trade-in bonus schedule
+// -- for display only (a "next trade is worth +N" preview); the server
+// re-derives and enforces the real value.
+const TRADE_IN_BASE_BONUSES = [4, 6, 8, 10, 12, 15];
+function previewTradeBonus(tradeInIndex: number): number {
+  if (tradeInIndex < TRADE_IN_BASE_BONUSES.length) return TRADE_IN_BASE_BONUSES[tradeInIndex];
+  const last = TRADE_IN_BASE_BONUSES[TRADE_IN_BASE_BONUSES.length - 1];
+  return last + 5 * (tradeInIndex - TRADE_IN_BASE_BONUSES.length + 1);
+}
+
+const CARD_SYMBOL_ICON: Record<string, string> = {
+  infantry: "🪖",
+  cavalry: "🐎",
+  artillery: "💥",
+  wild: "🃏",
+};
 
 const state = computed(() => props.boardState as unknown as ConquestStateShape | null);
 
@@ -117,6 +138,52 @@ const myContinentBonus = computed(() => {
     total: owned.reduce((sum, c) => sum + c.bonus, 0),
   };
 });
+
+// --- Cards ---
+
+const myHand = computed<CardDef[]>(() => {
+  if (props.mySeatIndex == null) return [];
+  return state.value?.hands?.[props.mySeatIndex] ?? [];
+});
+
+function cardCountFor(seatIndex: number): number {
+  return state.value?.hands?.[seatIndex]?.length ?? 0;
+}
+
+const mustTradeIn = computed(() => myHand.value.length >= 5);
+
+const selectedCardIds = ref<string[]>([]);
+
+function toggleCard(cardId: string) {
+  const i = selectedCardIds.value.indexOf(cardId);
+  if (i !== -1) {
+    selectedCardIds.value.splice(i, 1);
+    return;
+  }
+  if (selectedCardIds.value.length >= 3) return;
+  selectedCardIds.value.push(cardId);
+}
+
+// Same-shape check as the backend's isValidCardSet -- purely for enabling
+// the trade button early; the server re-validates and is authoritative.
+const selectedSetIsValid = computed(() => {
+  if (selectedCardIds.value.length !== 3) return false;
+  const cards = selectedCardIds.value
+    .map((id) => myHand.value.find((c) => c.id === id))
+    .filter((c): c is CardDef => !!c);
+  if (cards.length !== 3) return false;
+  if (cards.some((c) => c.symbol === "wild")) return true;
+  const [a, b, c] = cards.map((x) => x.symbol);
+  return (a === b && b === c) || (a !== b && b !== c && a !== c);
+});
+
+const nextTradeBonus = computed(() => previewTradeBonus(state.value?.cardsTradedInCount ?? 0));
+
+function submitTradeCards() {
+  if (!selectedSetIsValid.value) return;
+  emit("trade-cards", [...selectedCardIds.value]);
+  selectedCardIds.value = [];
+}
 
 // --- Layout ---
 
@@ -378,6 +445,9 @@ function nodeClasses(territoryId: string) {
 
       <div v-if="isMyTurn" class="card cb-action">
         <template v-if="state?.phase === 'reinforce'">
+          <p v-if="mustTradeIn" class="cb-must-trade">
+            🃏 You have {{ myHand.length }} cards -- trade in a set below before placing reinforcements.
+          </p>
           <p><strong>Reinforce:</strong> click your territories to place armies.</p>
           <p class="text-muted">Remaining: {{ state.reinforcementsRemaining }}</p>
           <p v-if="myContinentBonus.total > 0" class="text-muted cb-bonus-note">
@@ -466,6 +536,42 @@ function nodeClasses(territoryId: string) {
           Attacker lost {{ lastCombat.attackerLosses }}, defender lost {{ lastCombat.defenderLosses }}.
           <template v-if="lastCombat.captured">Territory captured!</template>
         </p>
+      </div>
+
+      <div class="card cb-cards">
+        <h4 class="panel-title">Your Cards</h4>
+        <p v-if="myHand.length === 0" class="text-muted">
+          None yet -- capture a territory during your attack phase to draw one.
+        </p>
+        <div v-else class="cb-hand">
+          <button
+            v-for="c in myHand"
+            :key="c.id"
+            type="button"
+            class="cb-card"
+            :class="{ 'cb-card-selected': selectedCardIds.includes(c.id) }"
+            :disabled="!isMyTurn || state?.phase !== 'reinforce'"
+            @click="toggleCard(c.id)"
+          >
+            <span class="cb-card-icon">{{ CARD_SYMBOL_ICON[c.symbol] }}</span>
+            <span class="cb-card-name">{{ c.territoryId ? TERRITORY_BY_ID[c.territoryId]?.name : "Wild" }}</span>
+          </button>
+        </div>
+        <button
+          v-if="isMyTurn && state?.phase === 'reinforce'"
+          class="btn btn-primary cb-trade-btn"
+          :disabled="!selectedSetIsValid"
+          @click="submitTradeCards"
+        >
+          Trade for +{{ nextTradeBonus }}
+        </button>
+        <div v-if="players.length > 1" class="cb-opponent-cards">
+          <div v-for="p in players" :key="`cards-${p.userId}`" class="cb-opponent-card-row">
+            <span class="cb-legend-swatch" :style="{ background: p.color ?? '#999' }" />
+            {{ p.displayName }}
+            <span class="text-muted">🃏 {{ cardCountFor(p.seatIndex) }}</span>
+          </div>
+        </div>
       </div>
 
       <div class="card cb-legend">
@@ -796,6 +902,91 @@ function nodeClasses(territoryId: string) {
   height: 10px;
   border-radius: 2px;
   flex-shrink: 0;
+}
+
+.cb-cards {
+  font-size: 0.8rem;
+}
+
+.cb-must-trade {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  background: rgba(255, 217, 61, 0.15);
+  color: #ffd93d;
+  font-size: 0.78rem;
+}
+
+.cb-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.cb-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.68rem;
+  min-width: 4.2rem;
+  transition:
+    border-color 0.1s ease,
+    transform 0.1s ease;
+}
+
+.cb-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cb-card:not(:disabled):hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.cb-card-selected {
+  border-color: #ffd93d;
+  transform: translateY(-2px);
+}
+
+.cb-card-icon {
+  font-size: 1.1rem;
+}
+
+.cb-card-name {
+  text-align: center;
+  line-height: 1.1;
+}
+
+.cb-trade-btn {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.cb-opponent-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.cb-opponent-card-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.cb-opponent-card-row .text-muted {
+  margin-left: auto;
 }
 
 @media (max-width: 640px) {

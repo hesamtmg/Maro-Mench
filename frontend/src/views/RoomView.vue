@@ -363,6 +363,10 @@ function handleConquestEndTurn() {
   roomStore.conquestEndTurn(props.id);
 }
 
+function handleConquestTradeCards(cardIds: string[]) {
+  roomStore.conquestTradeCards(props.id, cardIds);
+}
+
 function monopolyInJail(seatIndex: number): boolean {
   const state = roomStore.boardState as {
     players?: Record<number, { inJail: boolean }>;
@@ -797,6 +801,7 @@ onMounted(() => {
             @end-attack-phase="handleConquestEndAttackPhase"
             @fortify="handleConquestFortify"
             @end-turn="handleConquestEndTurn"
+            @trade-cards="handleConquestTradeCards"
           />
 
           <div v-if="roomStore.isPaused" class="paused-overlay">
@@ -876,6 +881,7 @@ onMounted(() => {
           @end-attack-phase="handleConquestEndAttackPhase"
           @fortify="handleConquestFortify"
           @end-turn="handleConquestEndTurn"
+          @trade-cards="handleConquestTradeCards"
         />
 
           <div v-if="roomStore.isPaused" class="paused-overlay">

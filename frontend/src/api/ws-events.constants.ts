@@ -34,6 +34,7 @@ export const WS_EVENTS_IN = {
   CONQUEST_END_ATTACK_PHASE: 'conquest_end_attack_phase',
   CONQUEST_FORTIFY: 'conquest_fortify',
   CONQUEST_END_TURN: 'conquest_end_turn',
+  CONQUEST_TRADE_CARDS: 'conquest_trade_cards',
 } as const;
 
 export const WS_EVENTS_OUT = {

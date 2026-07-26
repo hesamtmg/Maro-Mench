@@ -7,9 +7,11 @@ import {
 } from '../game-engine.interface';
 import {
   ADJACENCY,
+  CARD_DECK,
   CONTINENTS,
   STARTING_ARMIES_BY_PLAYER_COUNT,
   TERRITORIES,
+  type CardDef,
 } from './board-config';
 
 export type ConquestPhase = 'reinforce' | 'attack' | 'fortify';
@@ -26,6 +28,48 @@ export interface ConquestState {
   currentTurnSeat: number;
   phase: ConquestPhase;
   reinforcementsRemaining: number;
+  deck: CardDef[];
+  discard: CardDef[];
+  hands: Record<number, CardDef[]>;
+  cardsTradedInCount: number;
+  // Whether the current turn's player has captured at least one territory
+  // so far this turn -- drives whether they draw a card when the turn ends.
+  capturedTerritoryThisTurn: boolean;
+}
+
+// Bonus reinforcement armies for the Nth set traded in (0-indexed),
+// following the classic escalating schedule: 4,6,8,10,12,15, then +5 per
+// further trade-in (20,25,30,...).
+const TRADE_IN_BASE_BONUSES = [4, 6, 8, 10, 12, 15];
+
+function bonusForTradeIn(tradeInIndex: number): number {
+  if (tradeInIndex < TRADE_IN_BASE_BONUSES.length) {
+    return TRADE_IN_BASE_BONUSES[tradeInIndex];
+  }
+  const last = TRADE_IN_BASE_BONUSES[TRADE_IN_BASE_BONUSES.length - 1];
+  return last + 5 * (tradeInIndex - TRADE_IN_BASE_BONUSES.length + 1);
+}
+
+// A set is valid if all three symbols match, all three differ, or a
+// wildcard fills in for whichever pattern the other two cards support --
+// with only three non-wild symbols total, any hand containing at least
+// one wildcard always satisfies one of the two patterns.
+function isValidCardSet(cards: CardDef[]): boolean {
+  if (cards.length !== 3) return false;
+  if (cards.some((c) => c.symbol === 'wild')) return true;
+  const [a, b, c] = cards.map((x) => x.symbol);
+  const allSame = a === b && b === c;
+  const allDifferent = a !== b && b !== c && a !== c;
+  return allSame || allDifferent;
+}
+
+function shuffle<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
 export interface CombatResult {
@@ -51,6 +95,13 @@ function cloneState(state: ConquestState): ConquestState {
     currentTurnSeat: state.currentTurnSeat,
     phase: state.phase,
     reinforcementsRemaining: state.reinforcementsRemaining,
+    deck: [...state.deck],
+    discard: [...state.discard],
+    hands: Object.fromEntries(
+      Object.entries(state.hands).map(([k, v]) => [k, [...v]]),
+    ),
+    cardsTradedInCount: state.cardsTradedInCount,
+    capturedTerritoryThisTurn: state.capturedTerritoryThisTurn,
   };
 }
 
@@ -167,8 +218,10 @@ export class ConquestEngine implements GameEngine {
     }
 
     const players: Record<number, ConquestPlayerState> = {};
+    const hands: Record<number, CardDef[]> = {};
     for (const seat of seatIndexes) {
       players[seat] = { seatIndex: seat, eliminated: false };
+      hands[seat] = [];
     }
 
     const state: ConquestState = {
@@ -178,6 +231,11 @@ export class ConquestEngine implements GameEngine {
       currentTurnSeat: seatIndexes[0],
       phase: 'reinforce',
       reinforcementsRemaining: 0,
+      deck: shuffle(CARD_DECK),
+      discard: [],
+      hands,
+      cardsTradedInCount: 0,
+      capturedTerritoryThisTurn: false,
     };
     state.reinforcementsRemaining = reinforcementsFor(state, state.currentTurnSeat);
 
@@ -210,6 +268,9 @@ export class ConquestEngine implements GameEngine {
     const state = cloneState(boardStateIn as unknown as ConquestState);
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
     if (state.phase !== 'reinforce') throw new Error('Not in the reinforce phase.');
+    if ((state.hands[seatIndex]?.length ?? 0) >= 5) {
+      throw new Error('You have 5 or more cards -- trade in a set before placing reinforcements.');
+    }
     if (state.owner[territoryId] !== seatIndex) {
       throw new Error('You do not own that territory.');
     }
@@ -280,6 +341,7 @@ export class ConquestEngine implements GameEngine {
     if (state.armies[toId] <= 0) {
       captured = true;
       state.owner[toId] = seatIndex;
+      state.capturedTerritoryThisTurn = true;
       // Classic minimum: move in exactly as many armies as attacking dice
       // rolled -- a v1 simplification (no separate "how many to move in"
       // prompt). Always leaves at least 1 army behind in the source.
@@ -290,6 +352,12 @@ export class ConquestEngine implements GameEngine {
       if (territoryCount(state, defenderSeat) === 0) {
         state.players[defenderSeat].eliminated = true;
         eliminatedSeat = defenderSeat;
+        // Classic rule: eliminating a player hands you their whole hand.
+        state.hands[seatIndex] = [
+          ...(state.hands[seatIndex] ?? []),
+          ...(state.hands[defenderSeat] ?? []),
+        ];
+        state.hands[defenderSeat] = [];
       }
     }
 
@@ -328,6 +396,59 @@ export class ConquestEngine implements GameEngine {
     if (state.phase !== 'attack') throw new Error('Not in the attack phase.');
     state.phase = 'fortify';
     return state as unknown as Record<string, unknown>;
+  }
+
+  /**
+   * Trades in a matched set of 3 cards during the reinforce phase for an
+   * escalating reinforcement bonus. If one of the traded cards pictures a
+   * territory the seat currently owns, that territory also gets +2 armies
+   * placed directly on it.
+   */
+  tradeInCards(
+    boardStateIn: Record<string, unknown>,
+    seatIndex: number,
+    cardIds: string[],
+  ): { boardState: Record<string, unknown>; bonus: number; territoryBonusId: string | null } {
+    const state = cloneState(boardStateIn as unknown as ConquestState);
+    if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
+    if (state.phase !== 'reinforce') {
+      throw new Error('You can only trade in cards during the reinforce phase.');
+    }
+    if (cardIds.length !== 3) throw new Error('Trade in exactly 3 cards.');
+
+    const hand = state.hands[seatIndex] ?? [];
+    const uniqueIds = new Set(cardIds);
+    if (uniqueIds.size !== 3) throw new Error('Choose 3 different cards.');
+    const cards = cardIds.map((id) => hand.find((c) => c.id === id));
+    if (cards.some((c) => !c)) throw new Error('You do not hold one of those cards.');
+    const tradedCards = cards as CardDef[];
+    if (!isValidCardSet(tradedCards)) {
+      throw new Error(
+        'Those cards are not a valid set (three matching symbols, one of each, or wildcards filling in).',
+      );
+    }
+
+    const bonus = bonusForTradeIn(state.cardsTradedInCount);
+    state.cardsTradedInCount += 1;
+    state.reinforcementsRemaining += bonus;
+
+    let territoryBonusId: string | null = null;
+    for (const card of tradedCards) {
+      if (card.territoryId && state.owner[card.territoryId] === seatIndex) {
+        state.armies[card.territoryId] += 2;
+        territoryBonusId = card.territoryId;
+        break;
+      }
+    }
+
+    state.hands[seatIndex] = hand.filter((c) => !uniqueIds.has(c.id));
+    state.discard = [...state.discard, ...tradedCards];
+
+    return {
+      boardState: state as unknown as Record<string, unknown>,
+      bonus,
+      territoryBonusId,
+    };
   }
 
   /** Moves armies once between two owned territories connected through owned land, ending the turn. */
@@ -390,11 +511,31 @@ export class ConquestEngine implements GameEngine {
     return this.advanceTurn(state, { timedOut: true, autoPlaced });
   }
 
+  /** Draws one card for the seat ending their turn, reshuffling the discard pile back into the deck if the deck's empty. */
+  private drawCard(state: ConquestState): CardDef | null {
+    if (state.deck.length === 0) {
+      if (state.discard.length === 0) return null;
+      state.deck = shuffle(state.discard);
+      state.discard = [];
+    }
+    return state.deck.pop() ?? null;
+  }
+
   private advanceTurn(
     state: ConquestState,
     movePayload: Record<string, unknown>,
   ): MoveResult {
     const seatIndex = state.currentTurnSeat;
+
+    let drewCard: CardDef | null = null;
+    if (state.capturedTerritoryThisTurn) {
+      drewCard = this.drawCard(state);
+      if (drewCard) {
+        state.hands[seatIndex] = [...(state.hands[seatIndex] ?? []), drewCard];
+      }
+    }
+    state.capturedTerritoryThisTurn = false;
+
     const next = nextActiveSeat(state, state.currentTurnSeat);
     state.currentTurnSeat = next;
     state.phase = 'reinforce';
@@ -403,7 +544,7 @@ export class ConquestEngine implements GameEngine {
       boardState: state as unknown as Record<string, unknown>,
       nextTurnSeat: next,
       isGameOver: false,
-      movePayload: { ...movePayload, seatIndex },
+      movePayload: { ...movePayload, seatIndex, drewCard },
     };
   }
 }

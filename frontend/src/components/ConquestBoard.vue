@@ -575,9 +575,6 @@ const fortifyMoveCount = ref(1);
 function clearSelection() {
   selectedFrom.value = null;
   selectedTo.value = null;
-  moveFromId.value = null;
-  moveToId.value = null;
-  moveCount.value = 1;
   fortifyMoveCount.value = 1;
 }
 
@@ -651,51 +648,6 @@ watch(pendingOccupation, (p) => {
 function submitOccupyCaptured() {
   if (!pendingOccupation.value) return;
   emit("occupy-captured", occupyCount.value);
-}
-
-// --- Free army movement (reinforce and fortify phases) ---
-// Lets a player reposition armies between any two territories they own --
-// no adjacency or connected-path requirement -- as many times as they
-// like, in either phase, without ending the turn or the phase.
-const moveFromId = ref<string | null>(null);
-const moveToId = ref<string | null>(null);
-const moveCount = ref(1);
-
-const myOwnedTerritories = computed(() => {
-  const s = state.value;
-  const seat = props.mySeatIndex;
-  if (!s || seat == null) return [];
-  return TERRITORIES.filter((t) => s.owner[t.id] === seat).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
-});
-
-const moveFromMaxCount = computed(() => {
-  if (!moveFromId.value) return 1;
-  return Math.max(1, armiesOn(moveFromId.value) - 1);
-});
-watch(moveFromMaxCount, (max) => {
-  if (moveCount.value > max) moveCount.value = max;
-});
-watch(moveFromId, (id) => {
-  if (id && moveToId.value === id) moveToId.value = null;
-  moveCount.value = 1;
-});
-
-const canMoveArmies = computed(
-  () =>
-    !!moveFromId.value &&
-    !!moveToId.value &&
-    moveFromId.value !== moveToId.value &&
-    armiesOn(moveFromId.value) > 1
-);
-
-function submitMoveArmies() {
-  if (!canMoveArmies.value || !moveFromId.value || !moveToId.value) return;
-  emit("move-armies", moveFromId.value, moveToId.value, moveCount.value);
-  moveFromId.value = null;
-  moveToId.value = null;
-  moveCount.value = 1;
 }
 
 const attackableTargets = computed(() => {
@@ -1103,46 +1055,6 @@ function nodeClasses(territoryId: string) {
           >
             ↩️ Reset reinforcements
           </button>
-
-          <div class="cb-move-armies">
-            <p class="cb-move-armies-title">
-              <strong>Move armies</strong>
-              <span class="text-muted"> -- reposition troops anywhere on the map</span>
-            </p>
-            <div class="row cb-move-armies-row">
-              <select v-model="moveFromId" class="cb-move-select">
-                <option :value="null" disabled>From territory</option>
-                <option v-for="t in myOwnedTerritories" :key="t.id" :value="t.id">
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
-              <select v-model="moveToId" class="cb-move-select">
-                <option :value="null" disabled>To territory</option>
-                <option
-                  v-for="t in myOwnedTerritories"
-                  :key="t.id"
-                  :value="t.id"
-                  :disabled="t.id === moveFromId"
-                >
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
-              <input
-                v-model.number="moveCount"
-                type="number"
-                min="1"
-                :max="moveFromMaxCount"
-                class="cb-move-count"
-              />
-              <button
-                class="btn btn-secondary"
-                :disabled="!canMoveArmies"
-                @click="submitMoveArmies"
-              >
-                Move
-              </button>
-            </div>
-          </div>
         </template>
 
         <template v-else-if="state?.phase === 'attack'">
@@ -1824,26 +1736,6 @@ function nodeClasses(territoryId: string) {
 .cb-reset-btn {
   width: 100%;
   margin-top: 0.4rem;
-}
-
-.cb-move-armies {
-  margin-top: 0.6rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.cb-move-armies-title {
-  margin-bottom: 0.4rem;
-}
-
-.cb-move-armies-row {
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.cb-move-select {
-  flex: 1 1 8rem;
-  min-width: 0;
 }
 
 .cb-move-count {

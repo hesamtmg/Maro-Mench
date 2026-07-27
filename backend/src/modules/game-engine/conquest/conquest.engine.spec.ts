@@ -426,11 +426,18 @@ describe('ConquestEngine', () => {
       ).toThrow('You need at least 2 armies to attack from there.');
     });
 
-    it('caps attacker dice at armies-1 and at 3', () => {
-      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 1 });
+    it('caps attacker dice at total armies present and at 3', () => {
+      const s = baseState({ sunset_bay: 1 }, { icemark: 4, sunset_bay: 1 });
       expect(() =>
-        engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 3),
-      ).toThrow('You can attack with 1 to 2 dice here.');
+        engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 4),
+      ).toThrow('You can attack with 1 to 3 dice here.');
+    });
+
+    it('allows attacking with as many dice as armies present, up to 3', () => {
+      const s = baseState({ sunset_bay: 1 }, { icemark: 3, sunset_bay: 1 });
+      mockRolls(6, 1);
+      const { combat } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 3);
+      expect(combat.attackerDice.length).toBe(3);
     });
 
     it('rejects attacking outside the attack phase', () => {

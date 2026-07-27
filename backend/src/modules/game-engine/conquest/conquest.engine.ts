@@ -370,7 +370,7 @@ export class ConquestEngine implements GameEngine {
     if (attackerArmies < 2) {
       throw new Error('You need at least 2 armies to attack from there.');
     }
-    const maxAttackerDice = Math.min(3, attackerArmies - 1);
+    const maxAttackerDice = Math.min(3, attackerArmies);
     if (attackerDiceCount < 1 || attackerDiceCount > maxAttackerDice) {
       throw new Error(`You can attack with 1 to ${maxAttackerDice} dice here.`);
     }

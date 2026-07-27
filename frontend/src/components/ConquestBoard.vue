@@ -284,22 +284,139 @@ function armiesOn(territoryId: string): number {
   return state.value?.armies[territoryId] ?? 0;
 }
 
-// A stacked-up territory gets a rank badge on top of its army count, purely
-// cosmetic escalation (generic real-world rank names, highest count first
-// so the first match wins).
-const ARMY_RANK_TIERS: { min: number; name: string; color: string }[] = [
-  { min: 40, name: "General", color: "#e5e4e2" },
-  { min: 25, name: "Major", color: "#ffd700" },
-  { min: 15, name: "Captain", color: "#c0c0c0" },
-  { min: 10, name: "Sergeant", color: "#cd7f32" },
-  { min: 6, name: "Corporal", color: "#8a5a2b" },
-];
-function armyRankFor(count: number): { name: string; color: string } | null {
-  return ARMY_RANK_TIERS.find((tier) => count >= tier.min) ?? null;
+// Every territory carries a rank insignia based on its exact army count:
+// 1-4 armies escalate one chevron at a time; 5 adds an outline star, then
+// 6-9 add chevrons under that star; 10 upgrades to a shining (filled) star,
+// 11-14 add chevrons under that; 15+ replaces everything with crossed rifles.
+const RANK_BADGE_CX = -4.2;
+const RANK_BADGE_CY = 3.4;
+
+type ArmyBadgeSpec = {
+  chevrons: number;
+  star: "none" | "outline" | "shiny";
+  guns: boolean;
+  color: string;
+  label: string;
+};
+
+function armyBadgeSpecFor(count: number): ArmyBadgeSpec {
+  if (count >= 15) {
+    return { chevrons: 0, star: "none", guns: true, color: "#c0392b", label: "Crossed rifles" };
+  }
+  if (count >= 10) {
+    const extra = Math.min(4, count - 10);
+    return {
+      chevrons: extra,
+      star: "shiny",
+      guns: false,
+      color: "#ffd700",
+      label: extra > 0 ? `Shining star + ${extra} chevron${extra === 1 ? "" : "s"}` : "Shining star",
+    };
+  }
+  if (count >= 5) {
+    const extra = Math.min(4, count - 5);
+    return {
+      chevrons: extra,
+      star: "outline",
+      guns: false,
+      color: "#e8e8e8",
+      label: extra > 0 ? `Star + ${extra} chevron${extra === 1 ? "" : "s"}` : "Star",
+    };
+  }
+  const chevrons = Math.max(1, Math.min(4, count));
+  return {
+    chevrons,
+    star: "none",
+    guns: false,
+    color: "#cd7f32",
+    label: `${chevrons} chevron${chevrons === 1 ? "" : "s"}`,
+  };
 }
+
+function chevronPath(cx: number, cy: number, halfWidth: number): string {
+  const h = halfWidth * 0.38;
+  return `M ${cx - halfWidth} ${cy + h} L ${cx} ${cy - h} L ${cx + halfWidth} ${cy + h}`;
+}
+
+function starPath(cx: number, cy: number, outerR: number, innerR: number): string {
+  let d = "";
+  for (let i = 0; i < 10; i++) {
+    const angle = (Math.PI / 5) * i - Math.PI / 2;
+    const r = i % 2 === 0 ? outerR : innerR;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    d += `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)} `;
+  }
+  return `${d}Z`;
+}
+
+function sparklePath(cx: number, cy: number, size: number): string {
+  return `M ${cx} ${cy - size} L ${cx} ${cy + size} M ${cx - size} ${cy} L ${cx + size} ${cy}`;
+}
+
+type ArmyBadgeLayout = {
+  color: string;
+  label: string;
+  guns: boolean;
+  starPath: string | null;
+  starShiny: boolean;
+  sparklePath: string | null;
+  chevronPaths: string[];
+};
+
+function buildArmyBadgeLayout(count: number): ArmyBadgeLayout {
+  const spec = armyBadgeSpecFor(count);
+  if (spec.guns) {
+    return {
+      color: spec.color,
+      label: spec.label,
+      guns: true,
+      starPath: null,
+      starShiny: false,
+      sparklePath: null,
+      chevronPaths: [],
+    };
+  }
+  const hasStar = spec.star !== "none";
+  const starCx = RANK_BADGE_CX;
+  const starCy = RANK_BADGE_CY - (spec.chevrons > 0 ? 1.3 : 0);
+  const chevronSpacing = hasStar ? 0.95 : 1.15;
+  const chevronHalfWidth = hasStar ? 1.0 : 1.3;
+  const chevronStartY = hasStar
+    ? RANK_BADGE_CY + 0.9
+    : RANK_BADGE_CY - ((spec.chevrons - 1) * chevronSpacing) / 2;
+  const chevronPaths = Array.from({ length: spec.chevrons }, (_, i) =>
+    chevronPath(RANK_BADGE_CX, chevronStartY + i * chevronSpacing, chevronHalfWidth)
+  );
+  return {
+    color: spec.color,
+    label: spec.label,
+    guns: false,
+    starPath: hasStar ? starPath(starCx, starCy, 1.5, 0.65) : null,
+    starShiny: spec.star === "shiny",
+    sparklePath:
+      hasStar && spec.star === "shiny" ? sparklePath(starCx + 1.15, starCy - 1.1, 0.55) : null,
+    chevronPaths,
+  };
+}
+
 const armyRankByTerritory = computed(() => {
-  const map: Record<string, { name: string; color: string } | null> = {};
-  for (const t of TERRITORIES) map[t.id] = armyRankFor(armiesOn(t.id));
+  const map: Record<string, ArmyBadgeLayout> = {};
+  for (const t of TERRITORIES) map[t.id] = buildArmyBadgeLayout(armiesOn(t.id));
+  return map;
+});
+
+// Which of the 4 rank bands (chevrons-only / star / shiny star / crossed
+// rifles) a territory is in, driving how decorated its soldier figure is.
+function soldierTierFor(count: number): number {
+  if (count >= 15) return 3;
+  if (count >= 10) return 2;
+  if (count >= 5) return 1;
+  return 0;
+}
+const soldierTierByTerritory = computed(() => {
+  const map: Record<string, number> = {};
+  for (const t of TERRITORIES) map[t.id] = soldierTierFor(armiesOn(t.id));
   return map;
 });
 
@@ -432,13 +549,19 @@ const trophiesOpen = ref(false);
 const battleOpen = ref(true);
 const myCardsOpen = ref(true);
 
+// Clicking a selected card deselects it. Clicking a new card while 3 are
+// already selected swaps out the oldest selection instead of silently
+// doing nothing -- lets a player just click through the cards they want
+// without having to manually deselect one first.
 function toggleCard(cardId: string) {
   const i = selectedCardIds.value.indexOf(cardId);
   if (i !== -1) {
     selectedCardIds.value.splice(i, 1);
     return;
   }
-  if (selectedCardIds.value.length >= 3) return;
+  if (selectedCardIds.value.length >= 3) {
+    selectedCardIds.value.shift();
+  }
   selectedCardIds.value.push(cardId);
 }
 
@@ -564,13 +687,12 @@ const continentGradientStops = computed(() =>
 const selectedFrom = ref<string | null>(null);
 const selectedTo = ref<string | null>(null);
 const attackDiceCount = ref(1);
+const fortifyMoveCount = ref(1);
 
 function clearSelection() {
   selectedFrom.value = null;
   selectedTo.value = null;
-  moveFromId.value = null;
-  moveToId.value = null;
-  moveCount.value = 1;
+  fortifyMoveCount.value = 1;
 }
 
 // Reset whenever the phase changes out from under a stale selection.
@@ -581,10 +703,18 @@ watch(
 
 const maxAttackDice = computed(() => {
   if (!selectedFrom.value) return 1;
-  return Math.max(1, Math.min(3, armiesOn(selectedFrom.value) - 1));
+  return Math.max(1, Math.min(3, armiesOn(selectedFrom.value)));
 });
 watch(maxAttackDice, (max) => {
   if (attackDiceCount.value > max) attackDiceCount.value = max;
+});
+
+const maxFortifyMoveCount = computed(() => {
+  if (!selectedFrom.value) return 1;
+  return Math.max(1, armiesOn(selectedFrom.value) - 1);
+});
+watch(maxFortifyMoveCount, (max) => {
+  if (fortifyMoveCount.value > max) fortifyMoveCount.value = max;
 });
 
 // Lets a player keep attacking the same border with one click instead of
@@ -603,7 +733,7 @@ const canContinueAttack = computed(() => {
 function continueAttacking() {
   const lc = props.lastCombat;
   if (!lc || !canContinueAttack.value) return;
-  const dice = Math.max(1, Math.min(3, armiesOn(lc.fromId) - 1));
+  const dice = Math.max(1, Math.min(3, armiesOn(lc.fromId)));
   emit("attack", lc.fromId, lc.toId, dice);
 }
 
@@ -635,51 +765,6 @@ watch(pendingOccupation, (p) => {
 function submitOccupyCaptured() {
   if (!pendingOccupation.value) return;
   emit("occupy-captured", occupyCount.value);
-}
-
-// --- Free army movement (reinforce and fortify phases) ---
-// Lets a player reposition armies between any two territories they own --
-// no adjacency or connected-path requirement -- as many times as they
-// like, in either phase, without ending the turn or the phase.
-const moveFromId = ref<string | null>(null);
-const moveToId = ref<string | null>(null);
-const moveCount = ref(1);
-
-const myOwnedTerritories = computed(() => {
-  const s = state.value;
-  const seat = props.mySeatIndex;
-  if (!s || seat == null) return [];
-  return TERRITORIES.filter((t) => s.owner[t.id] === seat).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
-});
-
-const moveFromMaxCount = computed(() => {
-  if (!moveFromId.value) return 1;
-  return Math.max(1, armiesOn(moveFromId.value) - 1);
-});
-watch(moveFromMaxCount, (max) => {
-  if (moveCount.value > max) moveCount.value = max;
-});
-watch(moveFromId, (id) => {
-  if (id && moveToId.value === id) moveToId.value = null;
-  moveCount.value = 1;
-});
-
-const canMoveArmies = computed(
-  () =>
-    !!moveFromId.value &&
-    !!moveToId.value &&
-    moveFromId.value !== moveToId.value &&
-    armiesOn(moveFromId.value) > 1
-);
-
-function submitMoveArmies() {
-  if (!canMoveArmies.value || !moveFromId.value || !moveToId.value) return;
-  emit("move-armies", moveFromId.value, moveToId.value, moveCount.value);
-  moveFromId.value = null;
-  moveToId.value = null;
-  moveCount.value = 1;
 }
 
 const attackableTargets = computed(() => {
@@ -717,6 +802,22 @@ function onTerritoryClick(territoryId: string) {
     if (selectedFrom.value && attackableTargets.value.has(territoryId)) {
       selectedTo.value = territoryId;
     }
+    return;
+  }
+
+  if (s.phase === "fortify") {
+    if (!selectedFrom.value) {
+      if (mine && armiesOn(territoryId) >= 2) selectedFrom.value = territoryId;
+      return;
+    }
+    if (territoryId === selectedFrom.value) {
+      selectedFrom.value = null;
+      return;
+    }
+    if (mine) {
+      selectedTo.value = territoryId;
+      fortifyMoveCount.value = 1;
+    }
   }
 }
 
@@ -724,6 +825,14 @@ function submitAttack() {
   if (!selectedFrom.value || !selectedTo.value) return;
   emit("attack", selectedFrom.value, selectedTo.value, attackDiceCount.value);
   selectedTo.value = null;
+}
+
+function submitFortifyMove() {
+  if (!selectedFrom.value || !selectedTo.value) return;
+  emit("move-armies", selectedFrom.value, selectedTo.value, fortifyMoveCount.value);
+  selectedFrom.value = null;
+  selectedTo.value = null;
+  fortifyMoveCount.value = 1;
 }
 
 function endAttackPhase() {
@@ -876,32 +985,91 @@ function nodeClasses(territoryId: string) {
           :class="nodeClasses(node.id)"
           class="cb-node"
           :transform="`translate(${node.cx}, ${node.cy})`"
+          :style="{ '--rank-color': armyRankByTerritory[node.id].color }"
           @click="onTerritoryClick(node.id)"
         >
-          <title>{{ node.name }}{{ armyRankByTerritory[node.id] ? ` — ${armyRankByTerritory[node.id]!.name}` : "" }}</title>
+          <title>{{ node.name }} — {{ armyRankByTerritory[node.id].label }}</title>
           <circle cx="0" cy="0" r="8" class="cb-node-plinth" />
           <ellipse cx="0" cy="5.4" rx="3.6" ry="1.3" class="cb-soldier-shadow" />
-          <g class="cb-soldier" :fill="playerColor(ownerOf(node.id))">
+          <!-- The soldier figure itself escalates with rank: a helmet joins
+               at the star tier, epaulettes at the shiny-star tier, and at
+               the crossed-rifles tier the rifle becomes a raised saber and
+               a cape appears, plus a small size bump each step up. -->
+          <g
+            class="cb-soldier"
+            :class="`cb-soldier-tier-${soldierTierByTerritory[node.id]}`"
+            :fill="playerColor(ownerOf(node.id))"
+            :transform="`scale(${1 + soldierTierByTerritory[node.id] * 0.07})`"
+          >
+            <path
+              v-if="soldierTierByTerritory[node.id] >= 3"
+              class="cb-soldier-cape"
+              d="M-2 -1 L-3.6 4.2 L0 2.6 L3.6 4.2 L2 -1 Z"
+            />
             <path class="cb-soldier-leg" d="M-1.9 5.2 L-0.9 -1 L-0.1 -1 L-0.6 5.2 Z" />
             <path class="cb-soldier-leg" d="M1.9 5.2 L0.9 -1 L0.1 -1 L0.6 5.2 Z" />
             <path
               class="cb-soldier-body"
               d="M-2.3 -1 C-2.6 -4.6 -1.6 -6 0 -6 C1.6 -6 2.6 -4.6 2.3 -1 Z"
             />
-            <line class="cb-soldier-rifle" x1="-3.4" y1="-7.2" x2="2.1" y2="-0.6" />
+            <template v-if="soldierTierByTerritory[node.id] >= 2">
+              <line class="cb-soldier-epaulette" x1="-2.4" y1="-4.3" x2="-1.3" y2="-5.1" />
+              <line class="cb-soldier-epaulette" x1="2.4" y1="-4.3" x2="1.3" y2="-5.1" />
+            </template>
+            <line
+              v-if="soldierTierByTerritory[node.id] < 3"
+              class="cb-soldier-rifle"
+              x1="-3.4"
+              y1="-7.2"
+              x2="2.1"
+              y2="-0.6"
+            />
+            <template v-else>
+              <line class="cb-soldier-saber" x1="-3.6" y1="-8" x2="2.6" y2="-1.2" />
+              <line class="cb-soldier-saber-guard" x1="-2.6" y1="-6.9" x2="-1.7" y2="-8.4" />
+            </template>
             <circle class="cb-soldier-head" cx="0" cy="-7" r="1.7" />
+            <path
+              v-if="soldierTierByTerritory[node.id] >= 1"
+              class="cb-soldier-helmet"
+              d="M-1.9 -7.5 Q0 -9.3 1.9 -7.5"
+            />
           </g>
-          <circle
-            cx="4.2"
-            cy="3.4"
-            r="3.6"
-            class="cb-node-armybadge"
-            :class="{ 'cb-node-armybadge-ranked': armyRankByTerritory[node.id] }"
-            :style="{
-              '--player-color': playerColor(ownerOf(node.id)),
-              '--rank-color': armyRankByTerritory[node.id]?.color,
-            }"
-          />
+          <!-- Rank insignia on the left, mirroring the army-count badge on
+               the right: chevrons stack up to 4, then a star joins in (outline
+               at 5, filled/shiny at 10), then crossed rifles take over at 15. -->
+          <g class="cb-rank-badge">
+            <circle cx="-4.2" cy="3.4" r="4" class="cb-node-rankbadge" />
+            <template v-if="armyRankByTerritory[node.id].guns">
+              <g transform="rotate(45 -4.2 3.4)">
+                <line x1="-4.2" y1="0.3" x2="-4.2" y2="6.5" class="cb-rank-gun-barrel" />
+                <line x1="-5.3" y1="4.9" x2="-3.1" y2="4.9" class="cb-rank-gun-stock" />
+              </g>
+              <g transform="rotate(-45 -4.2 3.4)">
+                <line x1="-4.2" y1="0.3" x2="-4.2" y2="6.5" class="cb-rank-gun-barrel" />
+                <line x1="-5.3" y1="4.9" x2="-3.1" y2="4.9" class="cb-rank-gun-stock" />
+              </g>
+            </template>
+            <template v-else>
+              <path
+                v-if="armyRankByTerritory[node.id].starPath"
+                :d="armyRankByTerritory[node.id].starPath!"
+                :class="['cb-rank-star', { 'cb-rank-star-shiny': armyRankByTerritory[node.id].starShiny }]"
+              />
+              <path
+                v-if="armyRankByTerritory[node.id].sparklePath"
+                :d="armyRankByTerritory[node.id].sparklePath!"
+                class="cb-rank-sparkle"
+              />
+              <path
+                v-for="(d, i) in armyRankByTerritory[node.id].chevronPaths"
+                :key="i"
+                :d="d"
+                class="cb-rank-chevron"
+              />
+            </template>
+          </g>
+          <circle cx="4.2" cy="3.4" r="3.6" class="cb-node-armybadge" />
           <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
           <!-- Alternating vertical offset breaks label collisions between
                neighbors that happen to share almost the same y (a few real
@@ -1063,46 +1231,6 @@ function nodeClasses(territoryId: string) {
           >
             ↩️ Reset reinforcements
           </button>
-
-          <div class="cb-move-armies">
-            <p class="cb-move-armies-title">
-              <strong>Move armies</strong>
-              <span class="text-muted"> -- reposition troops anywhere on the map</span>
-            </p>
-            <div class="row cb-move-armies-row">
-              <select v-model="moveFromId" class="cb-move-select">
-                <option :value="null" disabled>From territory</option>
-                <option v-for="t in myOwnedTerritories" :key="t.id" :value="t.id">
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
-              <select v-model="moveToId" class="cb-move-select">
-                <option :value="null" disabled>To territory</option>
-                <option
-                  v-for="t in myOwnedTerritories"
-                  :key="t.id"
-                  :value="t.id"
-                  :disabled="t.id === moveFromId"
-                >
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
-              <input
-                v-model.number="moveCount"
-                type="number"
-                min="1"
-                :max="moveFromMaxCount"
-                class="cb-move-count"
-              />
-              <button
-                class="btn btn-secondary"
-                :disabled="!canMoveArmies"
-                @click="submitMoveArmies"
-              >
-                Move
-              </button>
-            </div>
-          </div>
         </template>
 
         <template v-else-if="state?.phase === 'attack'">
@@ -1126,45 +1254,24 @@ function nodeClasses(territoryId: string) {
         </template>
 
         <template v-else-if="state?.phase === 'fortify'">
-          <p><strong>Fortify:</strong> reposition your armies as many times as you like, then end your turn.</p>
-
-          <div class="cb-move-armies">
-            <p class="cb-move-armies-title">
-              <strong>Move armies</strong>
-              <span class="text-muted"> -- reposition troops anywhere on the map</span>
+          <p>
+            <strong>Fortify:</strong> click a territory of yours with 2+ armies, then another
+            territory of yours -- repeat as many times as you like, then end your turn.
+          </p>
+          <div v-if="selectedFrom && selectedTo" class="cb-attack-picker">
+            <p>
+              {{ TERRITORY_BY_ID[selectedFrom]?.name }} &rarr;
+              {{ TERRITORY_BY_ID[selectedTo]?.name }}
             </p>
-            <div class="row cb-move-armies-row">
-              <select v-model="moveFromId" class="cb-move-select">
-                <option :value="null" disabled>From territory</option>
-                <option v-for="t in myOwnedTerritories" :key="t.id" :value="t.id">
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
-              <select v-model="moveToId" class="cb-move-select">
-                <option :value="null" disabled>To territory</option>
-                <option
-                  v-for="t in myOwnedTerritories"
-                  :key="t.id"
-                  :value="t.id"
-                  :disabled="t.id === moveFromId"
-                >
-                  {{ t.name }} ({{ armiesOn(t.id) }})
-                </option>
-              </select>
+            <div class="row">
               <input
-                v-model.number="moveCount"
+                v-model.number="fortifyMoveCount"
                 type="number"
                 min="1"
-                :max="moveFromMaxCount"
+                :max="maxFortifyMoveCount"
                 class="cb-move-count"
               />
-              <button
-                class="btn btn-secondary"
-                :disabled="!canMoveArmies"
-                @click="submitMoveArmies"
-              >
-                Move
-              </button>
+              <button class="btn btn-primary" @click="submitFortifyMove">Move</button>
             </div>
           </div>
 
@@ -1485,6 +1592,37 @@ function nodeClasses(territoryId: string) {
   stroke-linecap: round;
 }
 
+.cb-soldier path.cb-soldier-helmet {
+  fill: none;
+  stroke: var(--rank-color, #e8e8e8);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+}
+
+.cb-soldier-epaulette {
+  stroke: var(--rank-color, #ffd700);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-soldier path.cb-soldier-cape {
+  fill: rgba(0, 0, 0, 0.35);
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 0.3;
+}
+
+.cb-soldier-saber {
+  stroke: #e8e8e8;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-soldier-saber-guard {
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 0.7;
+  stroke-linecap: round;
+}
+
 .cb-node:hover .cb-node-plinth {
   stroke: rgba(255, 255, 255, 0.85);
   stroke-width: 1.5;
@@ -1508,20 +1646,57 @@ function nodeClasses(territoryId: string) {
 
 .cb-node-armybadge {
   fill: #1a2033;
-  stroke: var(--player-color, #999);
+  stroke: var(--rank-color, #999);
+  stroke-width: 1.4;
+}
+
+.cb-node-rankbadge {
+  fill: #1a2033;
+  stroke: var(--rank-color, #999);
   stroke-width: 1;
 }
 
-/* A territory holding a big stack of armies gets a thicker, rank-colored
-   ring around its count badge instead of the plain owner-color ring --
-   glance-able escalation without cluttering the tiny node marker. */
-.cb-node-armybadge-ranked {
-  stroke: var(--rank-color, var(--player-color, #999));
-  stroke-width: 1.6;
+.cb-rank-chevron {
+  fill: none;
+  stroke: var(--rank-color, #ccc);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cb-rank-star {
+  fill: none;
+  stroke: var(--rank-color, #ccc);
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+
+.cb-rank-star-shiny {
+  fill: var(--rank-color, #ffd700);
+  stroke: #fff8dc;
+  stroke-width: 0.35;
+}
+
+.cb-rank-sparkle {
+  stroke: #fffbe0;
+  stroke-width: 0.4;
+  stroke-linecap: round;
+}
+
+.cb-rank-gun-barrel {
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-rank-gun-stock {
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 1.3;
+  stroke-linecap: round;
 }
 
 .cb-node-armies {
-  font-size: 6.5px;
+  font-size: 4.5px;
   font-weight: 800;
   fill: #fff;
   text-anchor: middle;
@@ -1805,26 +1980,6 @@ function nodeClasses(territoryId: string) {
 .cb-reset-btn {
   width: 100%;
   margin-top: 0.4rem;
-}
-
-.cb-move-armies {
-  margin-top: 0.6rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.cb-move-armies-title {
-  margin-bottom: 0.4rem;
-}
-
-.cb-move-armies-row {
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.cb-move-select {
-  flex: 1 1 8rem;
-  min-width: 0;
 }
 
 .cb-move-count {

@@ -193,6 +193,7 @@ onMounted(() => {
     createGameType.value = gameParam;
     publicRoomsGameFilter.value = gameParam;
     queueGameType.value = gameParam;
+    handleCreateGameTypeChange();
   }
   void loadPublicRooms();
   setupQueueListeners();

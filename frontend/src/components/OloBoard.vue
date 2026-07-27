@@ -13,7 +13,7 @@
 //     settled result up to the parent (RoomView), which relays them
 //     through the room's socket; the other player just renders whatever
 //     arrives, no local physics for the opponent's shot.
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import Matter from 'matter-js';
 import type { RoomPlayer } from '../types';
 
@@ -148,6 +148,27 @@ const localVsAi = ref(false);
 const containerEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 
+// ---------------- Board tilt / seat orientation -------------------------
+// A slight 3D tilt (perspective + rotateX) makes the felt read as a table
+// viewed at an angle rather than a flat top-down rectangle. On top of
+// that, the "topSeat" player in an online match gets an extra 180deg
+// flip so BOTH players always experience shooting bottom-to-top from
+// their own device -- the two seats otherwise render identically
+// (topSeat always at the absolute top of the canvas), which meant one
+// player had to flick downward. getPointer() below undoes this exact
+// transform to recover true canvas coordinates for drag/flick input.
+const TILT_DEG = 8;
+const TILT_RAD = (TILT_DEG * Math.PI) / 180;
+const PERSPECTIVE_PX = 1500;
+const topSeatRef = ref(0);
+const isFlipped = computed(
+  () => props.mode === 'online' && props.mySeatIndex != null && props.mySeatIndex === topSeatRef.value,
+);
+const canvasTransform = computed(
+  () =>
+    `perspective(${PERSPECTIVE_PX}px) rotateX(${TILT_DEG}deg)${isFlipped.value ? ' rotateZ(180deg)' : ''}`,
+);
+
 const turnLabel = ref('');
 const toastMsg = ref('');
 const toastVisible = ref(false);
@@ -186,6 +207,19 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let rafHandle: number | undefined;
 let lastLiveEmitAt = 0;
 const LIVE_EMIT_INTERVAL_MS = 70;
+
+// Lightens (positive amt) or darkens (negative amt) a "#rrggbb" color for
+// the disc's radial-gradient sphere shading.
+function shiftColor(hex: string, amt: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const num = parseInt(m[1], 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const r = clamp(((num >> 16) & 0xff) + amt * 255);
+  const g = clamp(((num >> 8) & 0xff) + amt * 255);
+  const b = clamp((num & 0xff) + amt * 255);
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 function playerColor(seatIndex: number): string {
   const fromRoom = props.players?.find((p) => p.seatIndex === seatIndex)?.color;
@@ -298,6 +332,7 @@ function loadDiscs(state: OloBoardState) {
   discEntries = [];
   topSeat = state.topSeat;
   bottomSeat = state.bottomSeat;
+  topSeatRef.value = state.topSeat;
   scoresDisplay.value = { ...state.scores };
 
   for (const disc of state.discs) {
@@ -614,9 +649,33 @@ function draw() {
   discEntries.forEach((d) => {
     if (!d.alive) return;
     const p = d.body.position;
+
+    // Contact shadow, offset toward the near edge, to lift the disc off
+    // the felt.
+    ctx!.beginPath();
+    ctx!.ellipse(p.x + d.r * 0.1, p.y + d.r * 0.2, d.r * 0.95, d.r * 0.82, 0, 0, Math.PI * 2);
+    ctx!.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx!.fill();
+
+    // Spherical shading: a radial gradient from a bright highlight
+    // (upper-left, as if lit from overhead) down through the base color
+    // to a darkened rim, so the disc reads as a puck rather than a flat
+    // circle.
+    const base = playerColor(d.owner);
+    const sheen = ctx!.createRadialGradient(
+      p.x - d.r * 0.35,
+      p.y - d.r * 0.4,
+      d.r * 0.05,
+      p.x,
+      p.y,
+      d.r,
+    );
+    sheen.addColorStop(0, shiftColor(base, 0.55));
+    sheen.addColorStop(0.55, base);
+    sheen.addColorStop(1, shiftColor(base, -0.35));
     ctx!.beginPath();
     ctx!.arc(p.x, p.y, d.r, 0, Math.PI * 2);
-    ctx!.fillStyle = playerColor(d.owner);
+    ctx!.fillStyle = sheen;
     ctx!.fill();
 
     const shootable = isMyTurnToShoot();
@@ -626,8 +685,8 @@ function draw() {
     ctx!.stroke();
 
     ctx!.beginPath();
-    ctx!.arc(p.x - d.r * 0.3, p.y - d.r * 0.3, d.r * 0.32, 0, Math.PI * 2);
-    ctx!.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx!.arc(p.x - d.r * 0.32, p.y - d.r * 0.36, d.r * 0.26, 0, Math.PI * 2);
+    ctx!.fillStyle = 'rgba(255,255,255,0.5)';
     ctx!.fill();
 
     const pipR = Math.max(1.5, d.r * 0.09);
@@ -669,15 +728,39 @@ let dragOffset = { x: 0, y: 0 };
 let posHistory: Array<{ x: number; y: number; t: number }> = [];
 
 function getPointer(evt: MouseEvent | TouchEvent) {
-  const canvas = canvasEl.value!;
-  const rect = canvas.getBoundingClientRect();
+  // Use the (untransformed) wrapper's box for the screen-space center --
+  // the canvas itself is visually tilted/flipped via canvasTransform, so
+  // its own getBoundingClientRect() no longer describes a plain axis-
+  // aligned rectangle we could subtract from directly. The wrapper stays
+  // untransformed and centers the canvas via flexbox, so its center
+  // point is exactly the canvas's (fixed) transform-origin.
+  const container = containerEl.value!;
+  const rect = container.getBoundingClientRect();
   const t: { clientX: number; clientY: number } =
     'touches' in evt && evt.touches[0]
       ? evt.touches[0]
       : 'changedTouches' in evt && evt.changedTouches[0]
         ? evt.changedTouches[0]
         : (evt as MouseEvent);
-  return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+
+  const sx = t.clientX - (rect.left + rect.width / 2);
+  const sy = t.clientY - (rect.top + rect.height / 2);
+
+  // Undo perspective(D) rotateX(TILT_DEG) [rotateZ(180deg)] to recover
+  // the local (pre-transform) canvas point that projects to this screen
+  // point. Derivation: a local (x, y, 0) point first optionally flips
+  // to (-x, -y) via rotateZ(180deg), then rotates about the x-axis to
+  // (x', y*cosA, y*sinA), then perspective-divides by (1 - z/D) to
+  // reach screen space. Solving that chain for (x, y) given (sx, sy)
+  // yields the closed form below.
+  const cosA = Math.cos(TILT_RAD);
+  const sinA = Math.sin(TILT_RAD);
+  const y1 = sy / (cosA + (sy * sinA) / PERSPECTIVE_PX);
+  const x1 = sx * (1 - (y1 * sinA) / PERSPECTIVE_PX);
+  const lx = isFlipped.value ? -x1 : x1;
+  const ly = isFlipped.value ? -y1 : y1;
+
+  return { x: lx + boardW / 2, y: ly + boardH / 2 };
 }
 
 function findMyDiscAt(pt: { x: number; y: number }): DiscEntry | null {
@@ -936,7 +1019,7 @@ function handleMenu() {
       </div>
 
       <div ref="containerEl" class="olo-board-wrap">
-        <canvas ref="canvasEl" class="olo-canvas" />
+        <canvas ref="canvasEl" class="olo-canvas" :style="{ transform: canvasTransform }" />
         <div class="olo-toast" :class="{ show: toastVisible }">{{ toastMsg }}</div>
       </div>
     </div>

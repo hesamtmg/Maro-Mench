@@ -58,6 +58,11 @@ function baseState(
     reinforcementsPlacedThisTurn: {},
     lastCaptureFromId: null,
     lastCaptureToId: null,
+    missionsEnabled: false,
+    missions: {},
+    eliminatedBy: {},
+    isGameOver: false,
+    winnerSeat: null,
     ...stateOverrides,
   };
 }
@@ -84,7 +89,7 @@ describe('ConquestEngine', () => {
 
   describe('createInitialState', () => {
     it('assigns every territory to a seat with at least 1 army', () => {
-      const state = engine.createInitialState(seats) as unknown as ConquestState;
+      const state = engine.createInitialState(seats, {}) as unknown as ConquestState;
       expect(Object.keys(state.owner)).toHaveLength(TERRITORIES.length);
       for (const t of TERRITORIES) {
         expect([0, 1]).toContain(state.owner[t.id]);
@@ -93,13 +98,13 @@ describe('ConquestEngine', () => {
     });
 
     it('deals out the full starting army pool for the player count', () => {
-      const state = engine.createInitialState(seats) as unknown as ConquestState;
+      const state = engine.createInitialState(seats, {}) as unknown as ConquestState;
       const totalArmies = Object.values(state.armies).reduce((a, b) => a + b, 0);
       expect(totalArmies).toBe(STARTING_ARMIES_BY_PLAYER_COUNT[2] * 2);
     });
 
     it('starts on seat 0, reinforce phase, with the correct reinforcement count', () => {
-      const state = engine.createInitialState(seats) as unknown as ConquestState;
+      const state = engine.createInitialState(seats, {}) as unknown as ConquestState;
       expect(state.currentTurnSeat).toBe(0);
       expect(state.phase).toBe('reinforce');
       const owned = Object.values(state.owner).filter((s) => s === 0).length;
@@ -107,7 +112,7 @@ describe('ConquestEngine', () => {
     });
 
     it('deals a full shuffled 44-card deck and empty hands to start', () => {
-      const state = engine.createInitialState(seats) as unknown as ConquestState;
+      const state = engine.createInitialState(seats, {}) as unknown as ConquestState;
       expect(state.deck).toHaveLength(TERRITORIES.length + 2);
       expect(state.discard).toEqual([]);
       expect(state.hands).toEqual({ 0: [], 1: [] });
@@ -122,7 +127,7 @@ describe('ConquestEngine', () => {
         { seatIndex: 2, userId: 'c' },
         { seatIndex: 3, userId: 'd' },
       ];
-      const state = engine.createInitialState(fourSeats) as unknown as ConquestState;
+      const state = engine.createInitialState(fourSeats, {}) as unknown as ConquestState;
       const owners = new Set(Object.values(state.owner));
       expect(owners).toEqual(new Set([0, 1, 2, 3]));
     });
@@ -909,6 +914,221 @@ describe('ConquestEngine', () => {
           hand.map((c) => c.id),
         );
         expect(territoryBonusId).toBeNull();
+      });
+    });
+  });
+
+  describe('secret missions', () => {
+    describe('assignment via createInitialState', () => {
+      it('does not enable or assign missions by default', () => {
+        const state = engine.createInitialState(seats, {}) as unknown as ConquestState;
+        expect(state.missionsEnabled).toBe(false);
+        expect(state.missions).toEqual({});
+      });
+
+      it('assigns every active seat a mission when secretMissions is true', () => {
+        const state = engine.createInitialState(seats, {
+          secretMissions: true,
+        }) as unknown as ConquestState;
+        expect(state.missionsEnabled).toBe(true);
+        expect(state.missions[0]).toBeDefined();
+        expect(state.missions[1]).toBeDefined();
+        expect(['continents', 'territories']).toContain(state.missions[0].kind);
+        expect(['continents', 'territories']).toContain(state.missions[1].kind);
+      });
+
+      it('never assigns an eliminate mission with only 2 players', () => {
+        for (let i = 0; i < 30; i++) {
+          const state = engine.createInitialState(seats, {
+            secretMissions: true,
+          }) as unknown as ConquestState;
+          expect(state.missions[0].kind).not.toBe('eliminate');
+          expect(state.missions[1].kind).not.toBe('eliminate');
+        }
+      });
+
+      it('can assign eliminate missions with 3+ players, never targeting yourself', () => {
+        const threeSeats: RoomPlayerSeat[] = [
+          { seatIndex: 0, userId: 'a' },
+          { seatIndex: 1, userId: 'b' },
+          { seatIndex: 2, userId: 'c' },
+        ];
+        let sawEliminate = false;
+        for (let i = 0; i < 50; i++) {
+          const state = engine.createInitialState(threeSeats, {
+            secretMissions: true,
+          }) as unknown as ConquestState;
+          for (const seat of [0, 1, 2]) {
+            const mission = state.missions[seat];
+            if (mission.kind === 'eliminate') {
+              sawEliminate = true;
+              expect(mission.targetSeat).not.toBe(seat);
+              expect([0, 1, 2]).toContain(mission.targetSeat);
+            }
+          }
+        }
+        expect(sawEliminate).toBe(true);
+      });
+    });
+
+    describe('completion', () => {
+      it('wins by conquering the mission continents, via attack', () => {
+        // Seat 0 owns everything including 3 of Oceania's 4 territories;
+        // seat 1 holds the last one (reefhaven), adjacent to seat 0's
+        // highmarch (Indonesia - New Guinea). Capturing it completes the
+        // "conquer Oceania" mission.
+        const s = baseState(
+          { reefhaven: 1 },
+          { highmarch: 3, reefhaven: 1 },
+          {
+            missionsEnabled: true,
+            missions: {
+              0: { kind: 'continents', continentIds: ['oceania'], description: 'Conquer Oceania.' },
+            },
+          },
+        );
+        mockRolls(6, 1);
+        const { boardState, combat } = engine.attack(asRecord(s), 0, 'highmarch', 'reefhaven', 1);
+        const result = boardState as unknown as ConquestState;
+        expect(combat.captured).toBe(true);
+        expect(combat.isGameOver).toBe(true);
+        expect(combat.winnerSeat).toBe(0);
+        expect(result.isGameOver).toBe(true);
+        expect(result.winnerSeat).toBe(0);
+      });
+
+      it('does not trigger a mission win when missionsEnabled is false, even though completing Oceania would otherwise satisfy it', () => {
+        // Seat 1 also holds himalaya (unrelated to Oceania) so losing
+        // reefhaven doesn't eliminate them and end the game the ordinary
+        // last-player-standing way -- isolates the missions-off behavior.
+        const s = baseState(
+          { reefhaven: 1, himalaya: 1 },
+          { highmarch: 3, reefhaven: 1 },
+          {
+            missionsEnabled: false,
+            missions: {
+              0: { kind: 'continents', continentIds: ['oceania'], description: 'Conquer Oceania.' },
+            },
+          },
+        );
+        mockRolls(6, 1);
+        const { boardState, combat } = engine.attack(asRecord(s), 0, 'highmarch', 'reefhaven', 1);
+        const result = boardState as unknown as ConquestState;
+        expect(combat.captured).toBe(true);
+        // Would satisfy the mission if it were on -- confirms the setup is
+        // otherwise valid, not just failing to reach the mission check.
+        expect(
+          TERRITORIES.filter((t) => t.continentId === 'oceania').every(
+            (t) => result.owner[t.id] === 0,
+          ),
+        ).toBe(true);
+        expect(combat.isGameOver).toBe(false);
+      });
+
+      it('wins by occupying enough territories with 2+ armies, via reinforce', () => {
+        const s = baseState(
+          {},
+          {},
+          {
+            phase: 'reinforce',
+            reinforcementsRemaining: 5,
+            missionsEnabled: true,
+            missions: {
+              0: { kind: 'territories', territoryCount: 2, description: 'Occupy 2 territories.' },
+            },
+          },
+        );
+        const first = engine.reinforce(asRecord(s), 0, 'icemark', 1) as unknown as ConquestState;
+        expect(first.isGameOver).toBe(false);
+        const second = engine.reinforce(
+          asRecord(first),
+          0,
+          'glacier_reach',
+          1,
+        ) as unknown as ConquestState;
+        expect(second.isGameOver).toBe(true);
+        expect(second.winnerSeat).toBe(0);
+      });
+
+      it('wins by occupying enough territories with 2+ armies, via moveArmies too', () => {
+        const s = baseState(
+          {},
+          { icemark: 3, glacier_reach: 1 },
+          {
+            phase: 'fortify',
+            missionsEnabled: true,
+            missions: {
+              0: { kind: 'territories', territoryCount: 2, description: 'Occupy 2 territories.' },
+            },
+          },
+        );
+        const result = engine.moveArmies(
+          asRecord(s),
+          0,
+          'icemark',
+          'glacier_reach',
+          1,
+        ) as unknown as ConquestState;
+        expect(result.armies.glacier_reach).toBe(2);
+        expect(result.isGameOver).toBe(true);
+        expect(result.winnerSeat).toBe(0);
+      });
+
+      it('wins an eliminate mission by personally eliminating the target', () => {
+        const s = baseState(
+          { sunset_bay: 1 },
+          { icemark: 3, sunset_bay: 1 },
+          {
+            players: {
+              0: { seatIndex: 0, eliminated: false },
+              1: { seatIndex: 1, eliminated: false },
+            },
+            missionsEnabled: true,
+            missions: {
+              0: { kind: 'eliminate', targetSeat: 1, description: 'Eliminate seat 1.' },
+            },
+          },
+        );
+        mockRolls(6, 1);
+        const { boardState, combat } = engine.attack(asRecord(s), 0, 'icemark', 'sunset_bay', 1);
+        const result = boardState as unknown as ConquestState;
+        expect(combat.eliminatedSeat).toBe(1);
+        expect(result.eliminatedBy[1]).toBe(0);
+        expect(combat.isGameOver).toBe(true);
+        expect(combat.winnerSeat).toBe(0);
+      });
+
+      it('does not complete an eliminate mission if someone else eliminates the target', () => {
+        // Three seats: seat 0's mission targets seat 1, but seat 2 is the
+        // one who actually delivers the final blow (via the Bering Strait
+        // adjacency, icemark -> sunset_bay).
+        const s = baseState(
+          { sunset_bay: 1, icemark: 2 },
+          { icemark: 3, sunset_bay: 1 },
+          {
+            currentTurnSeat: 2,
+            players: {
+              0: { seatIndex: 0, eliminated: false },
+              1: { seatIndex: 1, eliminated: false },
+              2: { seatIndex: 2, eliminated: false },
+            },
+            hands: { 0: [], 1: [], 2: [] },
+            missionsEnabled: true,
+            missions: {
+              0: { kind: 'eliminate', targetSeat: 1, description: 'Eliminate seat 1.' },
+            },
+          },
+        );
+        mockRolls(6, 1);
+        const { boardState, combat } = engine.attack(asRecord(s), 2, 'icemark', 'sunset_bay', 1);
+        const result = boardState as unknown as ConquestState;
+        expect(combat.eliminatedSeat).toBe(1);
+        expect(result.eliminatedBy[1]).toBe(2);
+        // Seat 2 eliminating seat 1 is not seat 0's mission -- seat 0 never
+        // gets credit, and (with only 2 territories held) can't hit the
+        // 24-territory fallback either.
+        expect(combat.isGameOver).toBe(false);
+        expect(result.isGameOver).toBe(false);
       });
     });
   });

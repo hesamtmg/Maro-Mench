@@ -360,6 +360,33 @@ function conquestContinentsOwned(seatIndex: number): { id: string; name: string 
   );
 }
 
+type ConquestMissionInstance =
+  | { kind: "continents"; continentIds: string[]; description: string }
+  | { kind: "territories"; territoryCount: number; description: string }
+  | { kind: "eliminate"; targetSeat: number; description: string };
+
+const conquestMissionsEnabled = computed(() => {
+  const state = roomStore.boardState as { missionsEnabled?: boolean } | null;
+  return state?.missionsEnabled ?? false;
+});
+
+const conquestMissions = computed(() => {
+  const state = roomStore.boardState as {
+    missions?: Record<number, ConquestMissionInstance>;
+  } | null;
+  return state?.missions ?? {};
+});
+
+function conquestMissionText(mission: ConquestMissionInstance): string {
+  if (mission.kind === "eliminate") {
+    const targetName =
+      roomStore.room?.players.find((p) => p.seatIndex === mission.targetSeat)?.displayName ??
+      "a player";
+    return `${mission.description} Target: ${targetName}.`;
+  }
+  return mission.description;
+}
+
 function conquestTerritoriesOwned(seatIndex: number): { id: string; name: string }[] {
   const state = roomStore.boardState as { owner?: Record<string, number> } | null;
   if (!state?.owner) return [];
@@ -654,6 +681,20 @@ onMounted(() => {
             <span class="text-muted"
               >${{ p.worth }}<template v-if="p.bankrupt"> · bankrupt</template></span
             >
+          </div>
+        </div>
+
+        <div v-if="conquestMissionsEnabled" class="net-worth-list">
+          <h4 class="panel-title">Secret missions revealed</h4>
+          <div
+            v-for="p in roomStore.room.players"
+            :key="`mission-${p.seatIndex}`"
+            class="row net-worth-row"
+          >
+            <strong>{{ p.displayName }}</strong>
+            <span class="text-muted" v-if="conquestMissions[p.seatIndex]">
+              {{ conquestMissionText(conquestMissions[p.seatIndex]) }}
+            </span>
           </div>
         </div>
 

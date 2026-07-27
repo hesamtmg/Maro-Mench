@@ -11,7 +11,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server } from 'socket.io';
-import { ConquestEngine } from '../game-engine/conquest/conquest.engine';
+import { ConquestEngine, ConquestState } from '../game-engine/conquest/conquest.engine';
 import { TERRITORY_BY_ID } from '../game-engine/conquest/board-config';
 import { GameEngineFactory } from '../game-engine/game-engine.factory';
 import { BOARD, HOTEL_LEVEL } from '../game-engine/monopoly/board-config';
@@ -1048,6 +1048,27 @@ export class GameGateway
     }
   }
 
+  /**
+   * Conquest-only: finishes the game if the board state just handed back
+   * shows a win -- either the classic last-player-standing condition or a
+   * completed secret mission. Reinforce/moveArmies/occupyCapturedTerritory
+   * can all complete a mission (armies crossing a territory-count
+   * threshold), on top of attack (which already carries its own combat
+   * -result isGameOver/winnerSeat and handles this inline).
+   */
+  private async finishConquestGameIfOver(
+    room: Room,
+    boardState: Record<string, unknown>,
+  ): Promise<void> {
+    const state = boardState as unknown as ConquestState;
+    if (!state.isGameOver) return;
+    this.scheduler.clearAllForRoom(room.id);
+    await this.gameStateService.finishGame(room.id);
+    this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
+      winnerSeat: state.winnerSeat,
+    });
+  }
+
   /** Conquest-only: places reinforcement armies on an owned territory. Doesn't consume the turn. */
   @SubscribeMessage(WS_EVENTS_IN.CONQUEST_REINFORCE)
   async onConquestReinforce(
@@ -1078,6 +1099,7 @@ export class GameGateway
         reinforced: TERRITORY_BY_ID[payload.territoryId]?.name ?? payload.territoryId,
         count: payload.count,
       });
+      await this.finishConquestGameIfOver(room, boardState);
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -1155,6 +1177,7 @@ export class GameGateway
           count: payload.count,
         },
       });
+      await this.finishConquestGameIfOver(room, boardState);
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }
@@ -1236,6 +1259,7 @@ export class GameGateway
         seatIndex: player.seatIndex,
         occupiedMore: payload.additionalCount,
       });
+      await this.finishConquestGameIfOver(room, boardState);
     } catch (err) {
       socket.emit(WS_EVENTS_OUT.ERROR, { message: (err as Error).message });
     }

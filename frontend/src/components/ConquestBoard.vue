@@ -284,24 +284,37 @@ function armiesOn(territoryId: string): number {
   return state.value?.armies[territoryId] ?? 0;
 }
 
-// A stacked-up territory gets a rank badge on top of its army count, purely
-// cosmetic escalation (generic real-world rank names, highest count first
-// so the first match wins).
-const ARMY_RANK_TIERS: { min: number; name: string; color: string }[] = [
-  { min: 40, name: "General", color: "#e5e4e2" },
-  { min: 25, name: "Major", color: "#ffd700" },
-  { min: 15, name: "Captain", color: "#c0c0c0" },
-  { min: 10, name: "Sergeant", color: "#cd7f32" },
-  { min: 6, name: "Corporal", color: "#8a5a2b" },
+// Every territory carries a military rank based on its army count, shown as
+// a chevron-striped badge on the map (highest min first so the first match
+// wins; min: 0 means every count matches something).
+const ARMY_RANK_TIERS: { min: number; name: string; color: string; level: number }[] = [
+  { min: 15, name: "Colonel", color: "#4169e1", level: 4 },
+  { min: 10, name: "Major", color: "#ffd700", level: 3 },
+  { min: 5, name: "Captain", color: "#c0c0c0", level: 2 },
+  { min: 0, name: "Sergeant", color: "#cd7f32", level: 1 },
 ];
-function armyRankFor(count: number): { name: string; color: string } | null {
-  return ARMY_RANK_TIERS.find((tier) => count >= tier.min) ?? null;
+function armyRankFor(count: number): { name: string; color: string; level: number } {
+  return (
+    ARMY_RANK_TIERS.find((tier) => count >= tier.min) ??
+    ARMY_RANK_TIERS[ARMY_RANK_TIERS.length - 1]
+  );
 }
 const armyRankByTerritory = computed(() => {
-  const map: Record<string, { name: string; color: string } | null> = {};
+  const map: Record<string, { name: string; color: string; level: number }> = {};
   for (const t of TERRITORIES) map[t.id] = armyRankFor(armiesOn(t.id));
   return map;
 });
+
+// Small chevron stripes drawn inside the rank badge -- one per rank level,
+// stacked and centered on the badge.
+function chevronPath(cx: number, cy: number): string {
+  return `M ${cx - 1.5} ${cy + 0.55} L ${cx} ${cy - 0.55} L ${cx + 1.5} ${cy + 0.55}`;
+}
+function chevronOffsets(level: number): number[] {
+  const spacing = 1.15;
+  const start = -((level - 1) * spacing) / 2;
+  return Array.from({ length: level }, (_, i) => start + i * spacing);
+}
 
 function isEliminated(seatIndex: number): boolean {
   return state.value?.players[seatIndex]?.eliminated ?? false;
@@ -870,7 +883,7 @@ function nodeClasses(territoryId: string) {
           :transform="`translate(${node.cx}, ${node.cy})`"
           @click="onTerritoryClick(node.id)"
         >
-          <title>{{ node.name }}{{ armyRankByTerritory[node.id] ? ` — ${armyRankByTerritory[node.id]!.name}` : "" }}</title>
+          <title>{{ node.name }} — {{ armyRankByTerritory[node.id].name }}</title>
           <circle cx="0" cy="0" r="8" class="cb-node-plinth" />
           <ellipse cx="0" cy="5.4" rx="3.6" ry="1.3" class="cb-soldier-shadow" />
           <g class="cb-soldier" :fill="playerColor(ownerOf(node.id))">
@@ -883,16 +896,24 @@ function nodeClasses(territoryId: string) {
             <line class="cb-soldier-rifle" x1="-3.4" y1="-7.2" x2="2.1" y2="-0.6" />
             <circle class="cb-soldier-head" cx="0" cy="-7" r="1.7" />
           </g>
+          <!-- Rank badge: a chevron-striped insignia on the left, mirroring
+               the army-count badge on the right. Chevron count == rank
+               level (1 Sergeant .. 4 Colonel). -->
+          <g class="cb-rank-badge" :style="{ '--rank-color': armyRankByTerritory[node.id].color }">
+            <circle cx="-4.2" cy="3.4" r="3.6" class="cb-node-rankbadge" />
+            <path
+              v-for="(dy, i) in chevronOffsets(armyRankByTerritory[node.id].level)"
+              :key="i"
+              :d="chevronPath(-4.2, 3.4 + dy)"
+              class="cb-rank-chevron"
+            />
+          </g>
           <circle
             cx="4.2"
             cy="3.4"
             r="3.6"
             class="cb-node-armybadge"
-            :class="{ 'cb-node-armybadge-ranked': armyRankByTerritory[node.id] }"
-            :style="{
-              '--player-color': playerColor(ownerOf(node.id)),
-              '--rank-color': armyRankByTerritory[node.id]?.color,
-            }"
+            :style="{ '--rank-color': armyRankByTerritory[node.id].color }"
           />
           <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
           <!-- Alternating vertical offset breaks label collisions between
@@ -1439,16 +1460,22 @@ function nodeClasses(territoryId: string) {
 
 .cb-node-armybadge {
   fill: #1a2033;
-  stroke: var(--player-color, #999);
+  stroke: var(--rank-color, #999);
+  stroke-width: 1.4;
+}
+
+.cb-node-rankbadge {
+  fill: #1a2033;
+  stroke: var(--rank-color, #999);
   stroke-width: 1;
 }
 
-/* A territory holding a big stack of armies gets a thicker, rank-colored
-   ring around its count badge instead of the plain owner-color ring --
-   glance-able escalation without cluttering the tiny node marker. */
-.cb-node-armybadge-ranked {
-  stroke: var(--rank-color, var(--player-color, #999));
-  stroke-width: 1.6;
+.cb-rank-chevron {
+  fill: none;
+  stroke: var(--rank-color, #ccc);
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .cb-node-armies {

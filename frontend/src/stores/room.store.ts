@@ -265,6 +265,14 @@ function conquestMoveMessage(
   payload: Record<string, unknown>,
 ): string {
   if (payload.timedOut) return `⏭️ ${name}'s turn timed out and was ended automatically.`;
+  const fortified = payload.fortified as
+    | { fromId: string; toId: string; count: number }
+    | undefined;
+  if (fortified) {
+    const fromName = TERRITORY_BY_ID[fortified.fromId]?.name ?? fortified.fromId;
+    const toName = TERRITORY_BY_ID[fortified.toId]?.name ?? fortified.toId;
+    return `🚩 ${name} fortified ${toName} from ${fromName} (${fortified.count}) and ended their turn.`;
+  }
   return `⏭️ ${name} ended their turn.`;
 }
 

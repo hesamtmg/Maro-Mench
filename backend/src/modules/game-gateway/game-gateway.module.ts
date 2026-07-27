@@ -9,6 +9,7 @@ import { GameState } from '../rooms/entities/game-state.entity';
 import { Room } from '../rooms/entities/room.entity';
 import { RoomPlayer } from '../rooms/entities/room-player.entity';
 import { RoomsModule } from '../rooms/rooms.module';
+import { StatsModule } from '../stats/stats.module';
 import { GameStateService } from './game-state.service';
 import { GameGateway } from './game.gateway';
 import { RoomSchedulerService } from './room-scheduler.service';
@@ -19,6 +20,7 @@ import { RoomSchedulerService } from './room-scheduler.service';
     RoomsModule,
     GameEngineModule,
     MatchmakingModule,
+    StatsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

@@ -58,6 +58,7 @@ const createGameType = ref<GameTypeCode>('ludo');
 const createVisibility = ref<'public' | 'private'>('public');
 const createMaxPlayers = ref(4);
 const createSecretMissions = ref(false);
+const createMultiFortify = ref(false);
 const isCreating = ref(false);
 const createError = ref('');
 
@@ -88,7 +89,10 @@ async function handleCreateRoom() {
       maxPlayers: createMaxPlayers.value,
       rulesJson:
         createGameType.value === 'conquest'
-          ? { secretMissions: createSecretMissions.value }
+          ? {
+              secretMissions: createSecretMissions.value,
+              multiFortify: createMultiFortify.value,
+            }
           : undefined,
     });
     await router.push({ name: 'room', params: { id: room.id } });
@@ -359,6 +363,18 @@ onUnmounted(() => {
             hold enough territories, or eliminate a rival) -- completing it
             wins the game instantly, on top of the usual last-player
             -standing win.
+          </p>
+        </div>
+
+        <div v-if="createGameType === 'conquest'" class="form-group">
+          <label>
+            <input type="checkbox" v-model="createMultiFortify" />
+            Multiple fortifies per turn
+          </label>
+          <p class="text-muted">
+            Off by default: fortifying moves armies once and immediately ends
+            your turn, like the classic game. Turn this on to fortify freely,
+            as many times as you like, before ending your turn yourself.
           </p>
         </div>
 

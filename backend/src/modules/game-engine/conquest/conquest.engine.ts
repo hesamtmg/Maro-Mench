@@ -67,6 +67,11 @@ export interface ConquestState {
   missionsEnabled: boolean;
   missions: Record<number, MissionInstance>;
   eliminatedBy: Record<number, number>;
+  // Room-creation option (rules.multiFortify, default off): whether
+  // fortify can be repeated freely without ending the turn. Off by
+  // default -- classic Risk allows exactly one fortify move (or none),
+  // which ends the turn immediately, same as clicking "End turn".
+  multiFortifyEnabled: boolean;
   // Set the moment any win condition (last-player-standing or a completed
   // mission) is satisfied, so every mutating method can report it the same
   // way regardless of which action triggered it.
@@ -149,6 +154,7 @@ function cloneState(state: ConquestState): ConquestState {
     eliminatedBy: { ...state.eliminatedBy },
     isGameOver: state.isGameOver,
     winnerSeat: state.winnerSeat,
+    multiFortifyEnabled: state.multiFortifyEnabled,
   };
 }
 
@@ -295,6 +301,7 @@ export class ConquestEngine implements GameEngine {
     const sortedSeats = [...seats].sort((a, b) => a.seatIndex - b.seatIndex);
     const seatIndexes = sortedSeats.map((s) => s.seatIndex);
     const missionsEnabled = Boolean(rules?.secretMissions);
+    const multiFortifyEnabled = Boolean(rules?.multiFortify);
 
     const shuffled = [...TERRITORIES];
     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -353,6 +360,7 @@ export class ConquestEngine implements GameEngine {
       eliminatedBy: {},
       isGameOver: false,
       winnerSeat: null,
+      multiFortifyEnabled,
     };
     state.reinforcementsRemaining = reinforcementsFor(state, state.currentTurnSeat);
 
@@ -438,9 +446,13 @@ export class ConquestEngine implements GameEngine {
   /**
    * Freely repositions armies between two territories the player already
    * owns, during the reinforce or fortify phase -- no adjacency or
-   * connected-path requirement, and it doesn't end the turn or consume the
-   * phase, so it can be called as many times as the player likes. At least
-   * one army must stay behind so a territory is never left empty.
+   * connected-path requirement. During reinforce it never ends the turn or
+   * consumes the phase, so it can be called as many times as the player
+   * likes. During fortify it depends on the room's multiFortify rule
+   * (default off): off means classic Risk -- this one move also ends the
+   * turn, same as clicking "End turn" right after; on means it stays
+   * repeatable like reinforce's free movement. At least one army must stay
+   * behind so a territory is never left empty.
    */
   moveArmies(
     boardStateIn: Record<string, unknown>,
@@ -448,7 +460,7 @@ export class ConquestEngine implements GameEngine {
     fromId: string,
     toId: string,
     count: number,
-  ): Record<string, unknown> {
+  ): Record<string, unknown> | MoveResult {
     const state = cloneState(boardStateIn as unknown as ConquestState);
     if (state.currentTurnSeat !== seatIndex) throw new Error('It is not your turn.');
     if (state.phase !== 'reinforce' && state.phase !== 'fortify') {
@@ -466,6 +478,10 @@ export class ConquestEngine implements GameEngine {
     state.armies[fromId] -= count;
     state.armies[toId] += count;
     checkMissionWin(state, seatIndex);
+
+    if (state.phase === 'fortify' && !state.multiFortifyEnabled) {
+      return this.advanceTurn(state, { fortified: { fromId, toId, count } });
+    }
 
     return state as unknown as Record<string, unknown>;
   }

@@ -14,6 +14,7 @@ import { Server } from 'socket.io';
 import { ConquestEngine, ConquestState } from '../game-engine/conquest/conquest.engine';
 import { TERRITORY_BY_ID } from '../game-engine/conquest/board-config';
 import { GameEngineFactory } from '../game-engine/game-engine.factory';
+import { MoveResult } from '../game-engine/game-engine.interface';
 import { BOARD, HOTEL_LEVEL } from '../game-engine/monopoly/board-config';
 import { MonopolyEngine } from '../game-engine/monopoly/monopoly.engine';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
@@ -1160,13 +1161,28 @@ export class GameGateway
     }
 
     try {
-      const boardState = this.conquestEngine.moveArmies(
+      const result = this.conquestEngine.moveArmies(
         gameState.boardState,
         player.seatIndex,
         payload.fromId,
         payload.toId,
         payload.count,
       );
+      // moveArmies during fortify with multiFortify off (the default) also
+      // ends the turn -- classic Risk's single fortify move -- and returns
+      // a full MoveResult (has nextTurnSeat) instead of a plain state, same
+      // as endTurn/forceEndTurn.
+      if ('nextTurnSeat' in result) {
+        await this.applyAndBroadcastMove(
+          room,
+          gameState,
+          player.seatIndex,
+          0,
+          result as MoveResult,
+        );
+        return;
+      }
+      const boardState = result;
       await this.gameStateService.updateGameState(gameState, { boardState });
       this.server.to(room.id).emit(WS_EVENTS_OUT.CONQUEST_STATE_UPDATED, {
         boardState,

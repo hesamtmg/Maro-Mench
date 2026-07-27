@@ -61,6 +61,7 @@ interface ConquestStateShape {
   lastCaptureToId: string | null;
   missionsEnabled: boolean;
   missions: Record<number, MissionInstance>;
+  multiFortifyEnabled: boolean;
 }
 
 // Client-side mirror of the backend's escalating trade-in bonus schedule
@@ -1277,9 +1278,14 @@ function nodeClasses(territoryId: string) {
         </template>
 
         <template v-else-if="state?.phase === 'fortify'">
-          <p>
+          <p v-if="state.multiFortifyEnabled">
             <strong>Fortify:</strong> click a territory of yours with 2+ armies, then another
             territory of yours -- repeat as many times as you like, then end your turn.
+          </p>
+          <p v-else>
+            <strong>Fortify:</strong> click a territory of yours with 2+ armies, then another
+            territory of yours to move armies -- this ends your turn, so make it count (or just
+            end your turn without fortifying).
           </p>
           <div v-if="selectedFrom && selectedTo" class="cb-attack-picker">
             <p>

@@ -1,5 +1,5 @@
 import { ConquestEngine, ConquestState, CombatResult } from './conquest.engine';
-import { RoomPlayerSeat } from '../game-engine.interface';
+import { RoomPlayerSeat, MoveResult } from '../game-engine.interface';
 import {
   CARD_BY_ID,
   STARTING_ARMIES_BY_PLAYER_COUNT,
@@ -63,6 +63,7 @@ function baseState(
     eliminatedBy: {},
     isGameOver: false,
     winnerSeat: null,
+    multiFortifyEnabled: false,
     ...stateOverrides,
   };
 }
@@ -315,11 +316,11 @@ describe('ConquestEngine', () => {
       );
     });
 
-    it('also works during the fortify phase, with no adjacency requirement', () => {
+    it('also works during the fortify phase when multiFortify is on, with no adjacency requirement', () => {
       const state = baseState(
         {},
         { icemark: 3, stormatoll: 1 },
-        { phase: 'fortify' },
+        { phase: 'fortify', multiFortifyEnabled: true },
       );
       const result = engine.moveArmies(
         asRecord(state),
@@ -331,6 +332,22 @@ describe('ConquestEngine', () => {
       expect(result.armies.icemark).toBe(2);
       expect(result.armies.stormatoll).toBe(2);
       expect(result.phase).toBe('fortify');
+    });
+
+    it('by default (multiFortify off), fortifying moves the armies and immediately ends the turn', () => {
+      const state = baseState(
+        {},
+        { icemark: 3, stormatoll: 1 },
+        { phase: 'fortify' },
+      );
+      const move = engine.moveArmies(asRecord(state), 0, 'icemark', 'stormatoll', 1) as MoveResult;
+      const result = move.boardState as unknown as ConquestState;
+      expect(result.armies.icemark).toBe(2);
+      expect(result.armies.stormatoll).toBe(2);
+      expect(move.nextTurnSeat).toBe(1);
+      expect(result.currentTurnSeat).toBe(1);
+      expect(result.phase).toBe('reinforce');
+      expect(move.movePayload.fortified).toEqual({ fromId: 'icemark', toId: 'stormatoll', count: 1 });
     });
 
     it('rejects moving outside the reinforce/fortify phases', () => {
@@ -548,14 +565,14 @@ describe('ConquestEngine', () => {
       expect(result.phase).toBe('fortify');
     });
 
-    it('fortifying (via moveArmies) does not end the turn, and can repeat', () => {
+    it('fortifying (via moveArmies) does not end the turn, and can repeat, with multiFortify on', () => {
       // pearl_isle is seat 0's, but its only neighbor (its sole link back to
       // the mainland) belongs to seat 1 -- fortify has no adjacency/corridor
       // requirement any more, so this still works.
       const s = baseState(
         { reefhaven: 1, whitepeak: 1 },
         { icemark: 5, pearl_isle: 1 },
-        { phase: 'fortify' },
+        { phase: 'fortify', multiFortifyEnabled: true },
       );
       const afterFirst = engine.moveArmies(
         asRecord(s),
@@ -1056,6 +1073,7 @@ describe('ConquestEngine', () => {
           { icemark: 3, glacier_reach: 1 },
           {
             phase: 'fortify',
+            multiFortifyEnabled: true,
             missionsEnabled: true,
             missions: {
               0: { kind: 'territories', territoryCount: 2, description: 'Occupy 2 territories.' },
@@ -1070,6 +1088,27 @@ describe('ConquestEngine', () => {
           1,
         ) as unknown as ConquestState;
         expect(result.armies.glacier_reach).toBe(2);
+        expect(result.isGameOver).toBe(true);
+        expect(result.winnerSeat).toBe(0);
+      });
+
+      it('a mission-completing fortify move with multiFortify off (the default) still reports the win, even though the move also ends the turn', () => {
+        const s = baseState(
+          {},
+          { icemark: 3, glacier_reach: 1 },
+          {
+            phase: 'fortify',
+            missionsEnabled: true,
+            missions: {
+              0: { kind: 'territories', territoryCount: 2, description: 'Occupy 2 territories.' },
+            },
+          },
+        );
+        const move = engine.moveArmies(asRecord(s), 0, 'icemark', 'glacier_reach', 1) as MoveResult;
+        const result = move.boardState as unknown as ConquestState;
+        expect(result.armies.glacier_reach).toBe(2);
+        expect(move.isGameOver).toBe(true);
+        expect(move.winnerSeat).toBe(0);
         expect(result.isGameOver).toBe(true);
         expect(result.winnerSeat).toBe(0);
       });

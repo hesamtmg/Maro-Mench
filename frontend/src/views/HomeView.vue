@@ -59,6 +59,7 @@ async function handleLogout() {
       <h1>MaroMench</h1>
       <div class="row">
         <span class="text-muted">{{ authStore.user?.displayName }}</span>
+        <RouterLink :to="{ name: 'stats' }" class="btn btn-secondary">🏆 Stats</RouterLink>
         <button class="btn btn-secondary" @click="handleLogout">Log out</button>
       </div>
     </div>

@@ -10,6 +10,7 @@ import {
   RoomPlayerStatus,
 } from '../rooms/entities/room-player.entity';
 import { Room, RoomStatus } from '../rooms/entities/room.entity';
+import { StatsService } from '../stats/stats.service';
 
 @Injectable()
 export class GameStateService {
@@ -23,6 +24,7 @@ export class GameStateService {
     @InjectRepository(RoomPlayer)
     private readonly roomPlayerRepository: Repository<RoomPlayer>,
     private readonly gameEngineFactory: GameEngineFactory,
+    private readonly statsService: StatsService,
   ) {}
 
   toSeats(players: RoomPlayer[]): RoomPlayerSeat[] {
@@ -106,10 +108,17 @@ export class GameStateService {
     return this.gameStateRepository.save(gameState);
   }
 
-  async finishGame(roomId: string): Promise<void> {
+  /**
+   * Marks the room finished and records the result (per-player win/loss,
+   * plus a running UserGameStats tally) for the game's history/leaderboard.
+   * `room` must have its `players` relation loaded -- every existing call
+   * site already has the full Room entity in hand.
+   */
+  async finishGame(room: Room, winnerSeat: number | null): Promise<void> {
     await this.roomRepository.update(
-      { id: roomId },
+      { id: room.id },
       { status: RoomStatus.FINISHED, finishedAt: new Date() },
     );
+    await this.statsService.recordGameResult(room, winnerSeat);
   }
 }

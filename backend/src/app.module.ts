@@ -8,6 +8,7 @@ import { GameEngineModule } from './modules/game-engine/game-engine.module';
 import { GameGatewayModule } from './modules/game-gateway/game-gateway.module';
 import { MatchmakingModule } from './modules/matchmaking/matchmaking.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
+import { StatsModule } from './modules/stats/stats.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { UsersModule } from './modules/users/users.module';
     GameEngineModule,
     GameGatewayModule,
     MatchmakingModule,
+    StatsModule,
   ],
 })
 export class AppModule {}

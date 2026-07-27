@@ -592,7 +592,7 @@ export class GameGateway
 
     if (payload.isGameOver) {
       this.scheduler.clearAllForRoom(room.id);
-      await this.gameStateService.finishGame(room.id);
+      await this.gameStateService.finishGame(room, payload.winnerSeat ?? null);
       this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
         winnerSeat: payload.winnerSeat,
       });
@@ -1064,7 +1064,7 @@ export class GameGateway
     const state = boardState as unknown as ConquestState;
     if (!state.isGameOver) return;
     this.scheduler.clearAllForRoom(room.id);
-    await this.gameStateService.finishGame(room.id);
+    await this.gameStateService.finishGame(room, state.winnerSeat);
     this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
       winnerSeat: state.winnerSeat,
     });
@@ -1233,7 +1233,7 @@ export class GameGateway
 
       if (combat.isGameOver) {
         this.scheduler.clearAllForRoom(room.id);
-        await this.gameStateService.finishGame(room.id);
+        await this.gameStateService.finishGame(room, combat.winnerSeat);
         this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
           winnerSeat: combat.winnerSeat,
         });
@@ -1440,7 +1440,7 @@ export class GameGateway
 
     if (moveResult.isGameOver) {
       this.scheduler.clearAllForRoom(room.id);
-      await this.gameStateService.finishGame(room.id);
+      await this.gameStateService.finishGame(room, moveResult.winnerSeat ?? null);
       this.server.to(room.id).emit(WS_EVENTS_OUT.GAME_OVER, {
         winnerSeat: moveResult.winnerSeat,
       });

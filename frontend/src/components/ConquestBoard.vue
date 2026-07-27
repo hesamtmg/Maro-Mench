@@ -406,6 +406,20 @@ const armyRankByTerritory = computed(() => {
   return map;
 });
 
+// Which of the 4 rank bands (chevrons-only / star / shiny star / crossed
+// rifles) a territory is in, driving how decorated its soldier figure is.
+function soldierTierFor(count: number): number {
+  if (count >= 15) return 3;
+  if (count >= 10) return 2;
+  if (count >= 5) return 1;
+  return 0;
+}
+const soldierTierByTerritory = computed(() => {
+  const map: Record<string, number> = {};
+  for (const t of TERRITORIES) map[t.id] = soldierTierFor(armiesOn(t.id));
+  return map;
+});
+
 function isEliminated(seatIndex: number): boolean {
   return state.value?.players[seatIndex]?.eliminated ?? false;
 }
@@ -971,25 +985,60 @@ function nodeClasses(territoryId: string) {
           :class="nodeClasses(node.id)"
           class="cb-node"
           :transform="`translate(${node.cx}, ${node.cy})`"
+          :style="{ '--rank-color': armyRankByTerritory[node.id].color }"
           @click="onTerritoryClick(node.id)"
         >
           <title>{{ node.name }} — {{ armyRankByTerritory[node.id].label }}</title>
           <circle cx="0" cy="0" r="8" class="cb-node-plinth" />
           <ellipse cx="0" cy="5.4" rx="3.6" ry="1.3" class="cb-soldier-shadow" />
-          <g class="cb-soldier" :fill="playerColor(ownerOf(node.id))">
+          <!-- The soldier figure itself escalates with rank: a helmet joins
+               at the star tier, epaulettes at the shiny-star tier, and at
+               the crossed-rifles tier the rifle becomes a raised saber and
+               a cape appears, plus a small size bump each step up. -->
+          <g
+            class="cb-soldier"
+            :class="`cb-soldier-tier-${soldierTierByTerritory[node.id]}`"
+            :fill="playerColor(ownerOf(node.id))"
+            :transform="`scale(${1 + soldierTierByTerritory[node.id] * 0.07})`"
+          >
+            <path
+              v-if="soldierTierByTerritory[node.id] >= 3"
+              class="cb-soldier-cape"
+              d="M-2 -1 L-3.6 4.2 L0 2.6 L3.6 4.2 L2 -1 Z"
+            />
             <path class="cb-soldier-leg" d="M-1.9 5.2 L-0.9 -1 L-0.1 -1 L-0.6 5.2 Z" />
             <path class="cb-soldier-leg" d="M1.9 5.2 L0.9 -1 L0.1 -1 L0.6 5.2 Z" />
             <path
               class="cb-soldier-body"
               d="M-2.3 -1 C-2.6 -4.6 -1.6 -6 0 -6 C1.6 -6 2.6 -4.6 2.3 -1 Z"
             />
-            <line class="cb-soldier-rifle" x1="-3.4" y1="-7.2" x2="2.1" y2="-0.6" />
+            <template v-if="soldierTierByTerritory[node.id] >= 2">
+              <line class="cb-soldier-epaulette" x1="-2.4" y1="-4.3" x2="-1.3" y2="-5.1" />
+              <line class="cb-soldier-epaulette" x1="2.4" y1="-4.3" x2="1.3" y2="-5.1" />
+            </template>
+            <line
+              v-if="soldierTierByTerritory[node.id] < 3"
+              class="cb-soldier-rifle"
+              x1="-3.4"
+              y1="-7.2"
+              x2="2.1"
+              y2="-0.6"
+            />
+            <template v-else>
+              <line class="cb-soldier-saber" x1="-3.6" y1="-8" x2="2.6" y2="-1.2" />
+              <line class="cb-soldier-saber-guard" x1="-2.6" y1="-6.9" x2="-1.7" y2="-8.4" />
+            </template>
             <circle class="cb-soldier-head" cx="0" cy="-7" r="1.7" />
+            <path
+              v-if="soldierTierByTerritory[node.id] >= 1"
+              class="cb-soldier-helmet"
+              d="M-1.9 -7.5 Q0 -9.3 1.9 -7.5"
+            />
           </g>
           <!-- Rank insignia on the left, mirroring the army-count badge on
                the right: chevrons stack up to 4, then a star joins in (outline
                at 5, filled/shiny at 10), then crossed rifles take over at 15. -->
-          <g class="cb-rank-badge" :style="{ '--rank-color': armyRankByTerritory[node.id].color }">
+          <g class="cb-rank-badge">
             <circle cx="-4.2" cy="3.4" r="4" class="cb-node-rankbadge" />
             <template v-if="armyRankByTerritory[node.id].guns">
               <g transform="rotate(45 -4.2 3.4)">
@@ -1020,13 +1069,7 @@ function nodeClasses(territoryId: string) {
               />
             </template>
           </g>
-          <circle
-            cx="4.2"
-            cy="3.4"
-            r="3.6"
-            class="cb-node-armybadge"
-            :style="{ '--rank-color': armyRankByTerritory[node.id].color }"
-          />
+          <circle cx="4.2" cy="3.4" r="3.6" class="cb-node-armybadge" />
           <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
           <!-- Alternating vertical offset breaks label collisions between
                neighbors that happen to share almost the same y (a few real
@@ -1546,6 +1589,37 @@ function nodeClasses(territoryId: string) {
 .cb-soldier-rifle {
   stroke: #3a3a3a;
   stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-soldier path.cb-soldier-helmet {
+  fill: none;
+  stroke: var(--rank-color, #e8e8e8);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+}
+
+.cb-soldier-epaulette {
+  stroke: var(--rank-color, #ffd700);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-soldier path.cb-soldier-cape {
+  fill: rgba(0, 0, 0, 0.35);
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 0.3;
+}
+
+.cb-soldier-saber {
+  stroke: #e8e8e8;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-soldier-saber-guard {
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 0.7;
   stroke-linecap: round;
 }
 

@@ -284,37 +284,127 @@ function armiesOn(territoryId: string): number {
   return state.value?.armies[territoryId] ?? 0;
 }
 
-// Every territory carries a military rank based on its army count, shown as
-// a chevron-striped badge on the map (highest min first so the first match
-// wins; min: 0 means every count matches something).
-const ARMY_RANK_TIERS: { min: number; name: string; color: string; level: number }[] = [
-  { min: 15, name: "Colonel", color: "#4169e1", level: 4 },
-  { min: 10, name: "Major", color: "#ffd700", level: 3 },
-  { min: 5, name: "Captain", color: "#c0c0c0", level: 2 },
-  { min: 0, name: "Sergeant", color: "#cd7f32", level: 1 },
-];
-function armyRankFor(count: number): { name: string; color: string; level: number } {
-  return (
-    ARMY_RANK_TIERS.find((tier) => count >= tier.min) ??
-    ARMY_RANK_TIERS[ARMY_RANK_TIERS.length - 1]
-  );
+// Every territory carries a rank insignia based on its exact army count:
+// 1-4 armies escalate one chevron at a time; 5 adds an outline star, then
+// 6-9 add chevrons under that star; 10 upgrades to a shining (filled) star,
+// 11-14 add chevrons under that; 15+ replaces everything with crossed rifles.
+const RANK_BADGE_CX = -4.2;
+const RANK_BADGE_CY = 3.4;
+
+type ArmyBadgeSpec = {
+  chevrons: number;
+  star: "none" | "outline" | "shiny";
+  guns: boolean;
+  color: string;
+  label: string;
+};
+
+function armyBadgeSpecFor(count: number): ArmyBadgeSpec {
+  if (count >= 15) {
+    return { chevrons: 0, star: "none", guns: true, color: "#c0392b", label: "Crossed rifles" };
+  }
+  if (count >= 10) {
+    const extra = Math.min(4, count - 10);
+    return {
+      chevrons: extra,
+      star: "shiny",
+      guns: false,
+      color: "#ffd700",
+      label: extra > 0 ? `Shining star + ${extra} chevron${extra === 1 ? "" : "s"}` : "Shining star",
+    };
+  }
+  if (count >= 5) {
+    const extra = Math.min(4, count - 5);
+    return {
+      chevrons: extra,
+      star: "outline",
+      guns: false,
+      color: "#e8e8e8",
+      label: extra > 0 ? `Star + ${extra} chevron${extra === 1 ? "" : "s"}` : "Star",
+    };
+  }
+  const chevrons = Math.max(1, Math.min(4, count));
+  return {
+    chevrons,
+    star: "none",
+    guns: false,
+    color: "#cd7f32",
+    label: `${chevrons} chevron${chevrons === 1 ? "" : "s"}`,
+  };
 }
+
+function chevronPath(cx: number, cy: number, halfWidth: number): string {
+  const h = halfWidth * 0.38;
+  return `M ${cx - halfWidth} ${cy + h} L ${cx} ${cy - h} L ${cx + halfWidth} ${cy + h}`;
+}
+
+function starPath(cx: number, cy: number, outerR: number, innerR: number): string {
+  let d = "";
+  for (let i = 0; i < 10; i++) {
+    const angle = (Math.PI / 5) * i - Math.PI / 2;
+    const r = i % 2 === 0 ? outerR : innerR;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    d += `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)} `;
+  }
+  return `${d}Z`;
+}
+
+function sparklePath(cx: number, cy: number, size: number): string {
+  return `M ${cx} ${cy - size} L ${cx} ${cy + size} M ${cx - size} ${cy} L ${cx + size} ${cy}`;
+}
+
+type ArmyBadgeLayout = {
+  color: string;
+  label: string;
+  guns: boolean;
+  starPath: string | null;
+  starShiny: boolean;
+  sparklePath: string | null;
+  chevronPaths: string[];
+};
+
+function buildArmyBadgeLayout(count: number): ArmyBadgeLayout {
+  const spec = armyBadgeSpecFor(count);
+  if (spec.guns) {
+    return {
+      color: spec.color,
+      label: spec.label,
+      guns: true,
+      starPath: null,
+      starShiny: false,
+      sparklePath: null,
+      chevronPaths: [],
+    };
+  }
+  const hasStar = spec.star !== "none";
+  const starCx = RANK_BADGE_CX;
+  const starCy = RANK_BADGE_CY - (spec.chevrons > 0 ? 1.3 : 0);
+  const chevronSpacing = hasStar ? 0.95 : 1.15;
+  const chevronHalfWidth = hasStar ? 1.0 : 1.3;
+  const chevronStartY = hasStar
+    ? RANK_BADGE_CY + 0.9
+    : RANK_BADGE_CY - ((spec.chevrons - 1) * chevronSpacing) / 2;
+  const chevronPaths = Array.from({ length: spec.chevrons }, (_, i) =>
+    chevronPath(RANK_BADGE_CX, chevronStartY + i * chevronSpacing, chevronHalfWidth)
+  );
+  return {
+    color: spec.color,
+    label: spec.label,
+    guns: false,
+    starPath: hasStar ? starPath(starCx, starCy, 1.5, 0.65) : null,
+    starShiny: spec.star === "shiny",
+    sparklePath:
+      hasStar && spec.star === "shiny" ? sparklePath(starCx + 1.15, starCy - 1.1, 0.55) : null,
+    chevronPaths,
+  };
+}
+
 const armyRankByTerritory = computed(() => {
-  const map: Record<string, { name: string; color: string; level: number }> = {};
-  for (const t of TERRITORIES) map[t.id] = armyRankFor(armiesOn(t.id));
+  const map: Record<string, ArmyBadgeLayout> = {};
+  for (const t of TERRITORIES) map[t.id] = buildArmyBadgeLayout(armiesOn(t.id));
   return map;
 });
-
-// Small chevron stripes drawn inside the rank badge -- one per rank level,
-// stacked and centered on the badge.
-function chevronPath(cx: number, cy: number): string {
-  return `M ${cx - 1.5} ${cy + 0.55} L ${cx} ${cy - 0.55} L ${cx + 1.5} ${cy + 0.55}`;
-}
-function chevronOffsets(level: number): number[] {
-  const spacing = 1.15;
-  const start = -((level - 1) * spacing) / 2;
-  return Array.from({ length: level }, (_, i) => start + i * spacing);
-}
 
 function isEliminated(seatIndex: number): boolean {
   return state.value?.players[seatIndex]?.eliminated ?? false;
@@ -883,7 +973,7 @@ function nodeClasses(territoryId: string) {
           :transform="`translate(${node.cx}, ${node.cy})`"
           @click="onTerritoryClick(node.id)"
         >
-          <title>{{ node.name }} — {{ armyRankByTerritory[node.id].name }}</title>
+          <title>{{ node.name }} — {{ armyRankByTerritory[node.id].label }}</title>
           <circle cx="0" cy="0" r="8" class="cb-node-plinth" />
           <ellipse cx="0" cy="5.4" rx="3.6" ry="1.3" class="cb-soldier-shadow" />
           <g class="cb-soldier" :fill="playerColor(ownerOf(node.id))">
@@ -896,17 +986,39 @@ function nodeClasses(territoryId: string) {
             <line class="cb-soldier-rifle" x1="-3.4" y1="-7.2" x2="2.1" y2="-0.6" />
             <circle class="cb-soldier-head" cx="0" cy="-7" r="1.7" />
           </g>
-          <!-- Rank badge: a chevron-striped insignia on the left, mirroring
-               the army-count badge on the right. Chevron count == rank
-               level (1 Sergeant .. 4 Colonel). -->
+          <!-- Rank insignia on the left, mirroring the army-count badge on
+               the right: chevrons stack up to 4, then a star joins in (outline
+               at 5, filled/shiny at 10), then crossed rifles take over at 15. -->
           <g class="cb-rank-badge" :style="{ '--rank-color': armyRankByTerritory[node.id].color }">
-            <circle cx="-4.2" cy="3.4" r="3.6" class="cb-node-rankbadge" />
-            <path
-              v-for="(dy, i) in chevronOffsets(armyRankByTerritory[node.id].level)"
-              :key="i"
-              :d="chevronPath(-4.2, 3.4 + dy)"
-              class="cb-rank-chevron"
-            />
+            <circle cx="-4.2" cy="3.4" r="4" class="cb-node-rankbadge" />
+            <template v-if="armyRankByTerritory[node.id].guns">
+              <g transform="rotate(45 -4.2 3.4)">
+                <line x1="-4.2" y1="0.3" x2="-4.2" y2="6.5" class="cb-rank-gun-barrel" />
+                <line x1="-5.3" y1="4.9" x2="-3.1" y2="4.9" class="cb-rank-gun-stock" />
+              </g>
+              <g transform="rotate(-45 -4.2 3.4)">
+                <line x1="-4.2" y1="0.3" x2="-4.2" y2="6.5" class="cb-rank-gun-barrel" />
+                <line x1="-5.3" y1="4.9" x2="-3.1" y2="4.9" class="cb-rank-gun-stock" />
+              </g>
+            </template>
+            <template v-else>
+              <path
+                v-if="armyRankByTerritory[node.id].starPath"
+                :d="armyRankByTerritory[node.id].starPath!"
+                :class="['cb-rank-star', { 'cb-rank-star-shiny': armyRankByTerritory[node.id].starShiny }]"
+              />
+              <path
+                v-if="armyRankByTerritory[node.id].sparklePath"
+                :d="armyRankByTerritory[node.id].sparklePath!"
+                class="cb-rank-sparkle"
+              />
+              <path
+                v-for="(d, i) in armyRankByTerritory[node.id].chevronPaths"
+                :key="i"
+                :d="d"
+                class="cb-rank-chevron"
+              />
+            </template>
           </g>
           <circle
             cx="4.2"
@@ -1473,13 +1585,44 @@ function nodeClasses(territoryId: string) {
 .cb-rank-chevron {
   fill: none;
   stroke: var(--rank-color, #ccc);
-  stroke-width: 0.7;
+  stroke-width: 0.6;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
+.cb-rank-star {
+  fill: none;
+  stroke: var(--rank-color, #ccc);
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+
+.cb-rank-star-shiny {
+  fill: var(--rank-color, #ffd700);
+  stroke: #fff8dc;
+  stroke-width: 0.35;
+}
+
+.cb-rank-sparkle {
+  stroke: #fffbe0;
+  stroke-width: 0.4;
+  stroke-linecap: round;
+}
+
+.cb-rank-gun-barrel {
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+.cb-rank-gun-stock {
+  stroke: var(--rank-color, #c0392b);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+
 .cb-node-armies {
-  font-size: 6.5px;
+  font-size: 4.5px;
   font-weight: 800;
   fill: #fff;
   text-anchor: middle;

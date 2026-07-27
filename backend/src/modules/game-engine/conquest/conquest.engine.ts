@@ -9,9 +9,11 @@ import {
   ADJACENCY,
   CARD_DECK,
   CONTINENTS,
+  MISSION_TEMPLATES,
   STARTING_ARMIES_BY_PLAYER_COUNT,
   TERRITORIES,
   type CardDef,
+  type MissionTemplate,
 } from './board-config';
 
 export type ConquestPhase = 'reinforce' | 'attack' | 'fortify';
@@ -20,6 +22,16 @@ export interface ConquestPlayerState {
   seatIndex: number;
   eliminated: boolean;
 }
+
+// A secret mission assigned to one seat at game start (only when the room
+// was created with the secretMissions rule on). Completing it is an
+// immediate, alternate win condition on top of the classic last-player
+// -standing one. 'eliminate' missions are generated per-seat at assignment
+// time (see assignMissions), targeting a random other active seat.
+export type MissionInstance =
+  | { kind: 'continents'; continentIds: string[]; description: string }
+  | { kind: 'territories'; territoryCount: number; description: string }
+  | { kind: 'eliminate'; targetSeat: number; description: string };
 
 export interface ConquestState {
   owner: Record<string, number>;
@@ -48,6 +60,18 @@ export interface ConquestState {
   // the choice is only available in the moment right after that capture.
   lastCaptureFromId: string | null;
   lastCaptureToId: string | null;
+  // Secret missions (optional room-creation variant, see rules.secretMissions
+  // in createInitialState). missions is empty when the variant is off.
+  // eliminatedBy records who personally eliminated each defeated seat, so an
+  // 'eliminate' mission can verify the mission holder did it themselves.
+  missionsEnabled: boolean;
+  missions: Record<number, MissionInstance>;
+  eliminatedBy: Record<number, number>;
+  // Set the moment any win condition (last-player-standing or a completed
+  // mission) is satisfied, so every mutating method can report it the same
+  // way regardless of which action triggered it.
+  isGameOver: boolean;
+  winnerSeat: number | null;
 }
 
 // Bonus reinforcement armies for the Nth set traded in (0-indexed),
@@ -118,6 +142,13 @@ function cloneState(state: ConquestState): ConquestState {
     reinforcementsPlacedThisTurn: { ...state.reinforcementsPlacedThisTurn },
     lastCaptureFromId: state.lastCaptureFromId,
     lastCaptureToId: state.lastCaptureToId,
+    missionsEnabled: state.missionsEnabled,
+    missions: Object.fromEntries(
+      Object.entries(state.missions).map(([k, v]) => [k, { ...v }]),
+    ),
+    eliminatedBy: { ...state.eliminatedBy },
+    isGameOver: state.isGameOver,
+    winnerSeat: state.winnerSeat,
   };
 }
 
@@ -166,6 +197,88 @@ function nextActiveSeat(state: ConquestState, fromSeat: number): number {
   return seats[(idx + 1) % seats.length];
 }
 
+function territoriesWithTwoArmies(state: ConquestState, seatIndex: number): number {
+  return Object.keys(state.owner).filter(
+    (id) => state.owner[id] === seatIndex && state.armies[id] >= 2,
+  ).length;
+}
+
+// Deals one secret mission to each active seat. "Eliminate an opponent"
+// missions only enter the pool with 3+ players, since with 2 it's identical
+// to the ordinary win condition; the target is picked per-seat so no one is
+// ever assigned themselves. Duplicate missions across different seats are
+// possible and fine, same as the classic game's shuffled mission deck.
+function assignMissions(seatIndexes: number[]): Record<number, MissionInstance> {
+  const missions: Record<number, MissionInstance> = {};
+  const eliminateEligible = seatIndexes.length >= 3;
+  for (const seat of seatIndexes) {
+    const totalOptions = MISSION_TEMPLATES.length + (eliminateEligible ? 1 : 0);
+    const pick = Math.floor(Math.random() * totalOptions);
+    if (eliminateEligible && pick === MISSION_TEMPLATES.length) {
+      const others = seatIndexes.filter((s) => s !== seat);
+      const targetSeat = others[Math.floor(Math.random() * others.length)];
+      missions[seat] = {
+        kind: 'eliminate',
+        targetSeat,
+        description: 'Eliminate a specific opponent from the game (capture every territory they own).',
+      };
+    } else {
+      const template: MissionTemplate = MISSION_TEMPLATES[pick];
+      if (template.kind === 'continents') {
+        missions[seat] = {
+          kind: 'continents',
+          continentIds: template.continentIds ?? [],
+          description: template.description,
+        };
+      } else {
+        missions[seat] = {
+          kind: 'territories',
+          territoryCount: template.territoryCount ?? 0,
+          description: template.description,
+        };
+      }
+    }
+  }
+  return missions;
+}
+
+// Whether `seatIndex`'s assigned mission is currently satisfied. 'eliminate'
+// missions fall back to the 24-territories goal if the target was
+// eliminated by someone else (or, defensively, targets the holder) -- the
+// mission can otherwise never be completed as written, same fallback the
+// classic game's card text spells out.
+function isMissionComplete(state: ConquestState, seatIndex: number): boolean {
+  const mission = state.missions[seatIndex];
+  if (!mission) return false;
+  if (mission.kind === 'continents') {
+    return mission.continentIds.every((continentId) => {
+      const members = TERRITORIES.filter((t) => t.continentId === continentId);
+      return members.length > 0 && members.every((t) => state.owner[t.id] === seatIndex);
+    });
+  }
+  if (mission.kind === 'territories') {
+    return territoriesWithTwoArmies(state, seatIndex) >= mission.territoryCount;
+  }
+  if (mission.targetSeat === seatIndex) {
+    return territoriesWithTwoArmies(state, seatIndex) >= 24;
+  }
+  if (state.players[mission.targetSeat]?.eliminated) {
+    return state.eliminatedBy[mission.targetSeat] === seatIndex;
+  }
+  return false;
+}
+
+// Marks the state won by `seatIndex` if their secret mission is complete
+// and no win has already been recorded this action. Called at the end of
+// every method that can change territory ownership or army counts.
+function checkMissionWin(state: ConquestState, seatIndex: number): void {
+  if (!state.missionsEnabled || state.isGameOver) return;
+  if (isMissionComplete(state, seatIndex)) {
+    state.isGameOver = true;
+    state.winnerSeat = seatIndex;
+  }
+}
+
 /**
  * Conquest is a territory-conquest game (reinforce / attack / fortify)
  * with no turn-starting dice roll or discrete token move -- it doesn't fit
@@ -175,9 +288,13 @@ function nextActiveSeat(state: ConquestState, fromSeat: number): number {
  */
 @Injectable()
 export class ConquestEngine implements GameEngine {
-  createInitialState(seats: RoomPlayerSeat[]): Record<string, unknown> {
+  createInitialState(
+    seats: RoomPlayerSeat[],
+    rules: Record<string, unknown>,
+  ): Record<string, unknown> {
     const sortedSeats = [...seats].sort((a, b) => a.seatIndex - b.seatIndex);
     const seatIndexes = sortedSeats.map((s) => s.seatIndex);
+    const missionsEnabled = Boolean(rules?.secretMissions);
 
     const shuffled = [...TERRITORIES];
     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -231,6 +348,11 @@ export class ConquestEngine implements GameEngine {
       reinforcementsPlacedThisTurn: {},
       lastCaptureFromId: null,
       lastCaptureToId: null,
+      missionsEnabled,
+      missions: missionsEnabled ? assignMissions(seatIndexes) : {},
+      eliminatedBy: {},
+      isGameOver: false,
+      winnerSeat: null,
     };
     state.reinforcementsRemaining = reinforcementsFor(state, state.currentTurnSeat);
 
@@ -281,6 +403,7 @@ export class ConquestEngine implements GameEngine {
     if (state.reinforcementsRemaining === 0) {
       state.phase = 'attack';
     }
+    checkMissionWin(state, seatIndex);
 
     return state as unknown as Record<string, unknown>;
   }
@@ -342,6 +465,7 @@ export class ConquestEngine implements GameEngine {
 
     state.armies[fromId] -= count;
     state.armies[toId] += count;
+    checkMissionWin(state, seatIndex);
 
     return state as unknown as Record<string, unknown>;
   }
@@ -418,6 +542,7 @@ export class ConquestEngine implements GameEngine {
       if (territoryCount(state, defenderSeat) === 0) {
         state.players[defenderSeat].eliminated = true;
         eliminatedSeat = defenderSeat;
+        state.eliminatedBy[defenderSeat] = seatIndex;
         // Classic rule: eliminating a player hands you their whole hand.
         state.hands[seatIndex] = [
           ...(state.hands[seatIndex] ?? []),
@@ -427,13 +552,15 @@ export class ConquestEngine implements GameEngine {
       }
     }
 
-    let isGameOver = false;
-    let winnerSeat: number | null = null;
     const remaining = activeSeats(state);
     if (remaining.length === 1) {
-      isGameOver = true;
-      winnerSeat = remaining[0];
+      state.isGameOver = true;
+      state.winnerSeat = remaining[0];
+    } else {
+      checkMissionWin(state, seatIndex);
     }
+    const isGameOver = state.isGameOver;
+    const winnerSeat = state.winnerSeat;
 
     return {
       boardState: state as unknown as Record<string, unknown>,
@@ -480,6 +607,7 @@ export class ConquestEngine implements GameEngine {
 
     state.armies[state.lastCaptureFromId] -= additionalCount;
     state.armies[state.lastCaptureToId] += additionalCount;
+    checkMissionWin(state, seatIndex);
 
     return state as unknown as Record<string, unknown>;
   }
@@ -619,7 +747,8 @@ export class ConquestEngine implements GameEngine {
     return {
       boardState: state as unknown as Record<string, unknown>,
       nextTurnSeat: next,
-      isGameOver: false,
+      isGameOver: state.isGameOver,
+      winnerSeat: state.winnerSeat ?? undefined,
       movePayload: { ...movePayload, seatIndex, drewCard },
     };
   }

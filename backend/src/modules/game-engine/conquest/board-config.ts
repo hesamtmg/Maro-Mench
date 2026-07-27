@@ -244,3 +244,59 @@ export const CARD_DECK: CardDef[] = [
 export const CARD_BY_ID: Record<string, CardDef> = Object.fromEntries(
   CARD_DECK.map((c) => [c.id, c]),
 );
+
+// Secret mission templates -- an optional room-creation variant. Each
+// active seat is dealt one of these (or a dynamically-targeted "eliminate
+// an opponent" mission, see conquest.engine.ts) at game start; completing
+// it is an alternate, immediate win condition alongside the classic
+// last-player-standing one. Continent combos mirror the classic game's
+// mission set, adapted to this map's continent names/sizes.
+export interface MissionTemplate {
+  kind: 'continents' | 'territories';
+  continentIds?: string[];
+  territoryCount?: number;
+  description: string;
+}
+
+export const MISSION_TEMPLATES: MissionTemplate[] = [
+  {
+    kind: 'continents',
+    continentIds: ['north_america', 'africa'],
+    description: 'Conquer all of North America and Africa.',
+  },
+  {
+    kind: 'continents',
+    continentIds: ['north_america', 'oceania'],
+    description: 'Conquer all of North America and Oceania.',
+  },
+  {
+    kind: 'continents',
+    continentIds: ['asia', 'south_america'],
+    description: 'Conquer all of Asia and South America.',
+  },
+  {
+    kind: 'continents',
+    continentIds: ['asia', 'africa'],
+    description: 'Conquer all of Asia and Africa.',
+  },
+  {
+    kind: 'continents',
+    continentIds: ['europe', 'south_america', 'africa'],
+    description: 'Conquer all of Europe, South America, and Africa.',
+  },
+  {
+    kind: 'continents',
+    continentIds: ['europe', 'oceania', 'south_america'],
+    description: 'Conquer all of Europe, Oceania, and South America.',
+  },
+  {
+    kind: 'territories',
+    territoryCount: 24,
+    description: 'Occupy 24 territories of your choice, with at least 2 armies on each.',
+  },
+  {
+    kind: 'territories',
+    territoryCount: 18,
+    description: 'Occupy 18 territories of your choice, with at least 2 armies on each.',
+  },
+];

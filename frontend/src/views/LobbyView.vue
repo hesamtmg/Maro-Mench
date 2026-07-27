@@ -57,6 +57,7 @@ function isMyRoom(room: Room): boolean {
 const createGameType = ref<GameTypeCode>('ludo');
 const createVisibility = ref<'public' | 'private'>('public');
 const createMaxPlayers = ref(4);
+const createSecretMissions = ref(false);
 const isCreating = ref(false);
 const createError = ref('');
 
@@ -85,6 +86,10 @@ async function handleCreateRoom() {
       gameTypeCode: createGameType.value,
       visibility: createVisibility.value,
       maxPlayers: createMaxPlayers.value,
+      rulesJson:
+        createGameType.value === 'conquest'
+          ? { secretMissions: createSecretMissions.value }
+          : undefined,
     });
     await router.push({ name: 'room', params: { id: room.id } });
   } catch (err) {
@@ -342,6 +347,19 @@ onUnmounted(() => {
             :max="createMaxPlayersLimit"
             :disabled="createGameType === 'olo'"
           />
+        </div>
+
+        <div v-if="createGameType === 'conquest'" class="form-group">
+          <label>
+            <input type="checkbox" v-model="createSecretMissions" />
+            Secret missions
+          </label>
+          <p class="text-muted">
+            Each player gets a hidden objective (conquer certain continents,
+            hold enough territories, or eliminate a rival) -- completing it
+            wins the game instantly, on top of the usual last-player
+            -standing win.
+          </p>
         </div>
 
         <p v-if="createError" class="error-text">{{ createError }}</p>

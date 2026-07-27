@@ -42,6 +42,11 @@ interface ConquestPlayerState {
   eliminated: boolean;
 }
 
+type MissionInstance =
+  | { kind: "continents"; continentIds: string[]; description: string }
+  | { kind: "territories"; territoryCount: number; description: string }
+  | { kind: "eliminate"; targetSeat: number; description: string };
+
 interface ConquestStateShape {
   owner: Record<string, number>;
   armies: Record<string, number>;
@@ -54,6 +59,8 @@ interface ConquestStateShape {
   cardsTradedInCount: number;
   lastCaptureFromId: string | null;
   lastCaptureToId: string | null;
+  missionsEnabled: boolean;
+  missions: Record<number, MissionInstance>;
 }
 
 // Client-side mirror of the backend's escalating trade-in bonus schedule
@@ -275,6 +282,22 @@ function nameForSeat(seatIndex: number | null): string {
   if (seatIndex == null) return "A player";
   return props.players.find((p) => p.seatIndex === seatIndex)?.displayName ?? "A player";
 }
+
+// Secret missions (optional room variant) -- only your own is shown during
+// play; RoomView reveals everyone's once the game ends.
+const myMission = computed(() => {
+  const s = state.value;
+  if (!s?.missionsEnabled || props.mySeatIndex == null) return null;
+  return s.missions[props.mySeatIndex] ?? null;
+});
+const myMissionText = computed(() => {
+  const mission = myMission.value;
+  if (!mission) return "";
+  if (mission.kind === "eliminate") {
+    return `${mission.description} Target: ${nameForSeat(mission.targetSeat)}.`;
+  }
+  return mission.description;
+});
 
 function ownerOf(territoryId: string): number | null {
   return state.value?.owner[territoryId] ?? null;
@@ -1357,6 +1380,11 @@ function nodeClasses(territoryId: string) {
         </template>
       </div>
 
+      <div v-if="myMission" class="card cb-mission">
+        <h4 class="panel-title">🎯 Your Secret Mission</h4>
+        <p>{{ myMissionText }}</p>
+      </div>
+
       <div class="card cb-cards">
         <button
           type="button"
@@ -2083,6 +2111,16 @@ function nodeClasses(territoryId: string) {
 
 .cb-cards {
   font-size: 0.8rem;
+}
+
+.cb-mission {
+  font-size: 0.8rem;
+  border: 1px solid rgba(255, 217, 61, 0.35);
+  background: rgba(255, 217, 61, 0.06);
+}
+
+.cb-mission p {
+  margin: 0.3rem 0 0;
 }
 
 .cb-must-trade {

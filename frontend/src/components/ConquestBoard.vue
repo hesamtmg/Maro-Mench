@@ -589,7 +589,7 @@ watch(
 
 const maxAttackDice = computed(() => {
   if (!selectedFrom.value) return 1;
-  return Math.max(1, Math.min(3, armiesOn(selectedFrom.value) - 1));
+  return Math.max(1, Math.min(3, armiesOn(selectedFrom.value)));
 });
 watch(maxAttackDice, (max) => {
   if (attackDiceCount.value > max) attackDiceCount.value = max;
@@ -619,7 +619,7 @@ const canContinueAttack = computed(() => {
 function continueAttacking() {
   const lc = props.lastCombat;
   if (!lc || !canContinueAttack.value) return;
-  const dice = Math.max(1, Math.min(3, armiesOn(lc.fromId) - 1));
+  const dice = Math.max(1, Math.min(3, armiesOn(lc.fromId)));
   emit("attack", lc.fromId, lc.toId, dice);
 }
 

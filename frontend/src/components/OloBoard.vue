@@ -580,64 +580,198 @@ function resizeCanvas() {
 }
 
 // ---------------- Rendering --------------------------------------------
+// Visual-only state: short motion trails per disc, so fast shots leave a
+// streak behind them. Never feeds back into physics or the network.
+const TRAIL_LEN = 10;
+const trails = new Map<string, Array<{ x: number; y: number }>>();
+
+function withAlpha(color: string, alpha: number): string {
+  const hex = color.trim();
+  const m3 = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex);
+  const m6 = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  let rgb: number[] | null = null;
+  if (m6) rgb = [m6[1], m6[2], m6[3]].map((h) => parseInt(h, 16));
+  else if (m3) rgb = [m3[1], m3[2], m3[3]].map((h) => parseInt(h + h, 16));
+  if (!rgb) return color; // named colours: caller also sets globalAlpha
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+}
+
+function shade(color: string, amount: number): string {
+  // amount > 0 lightens toward white, < 0 darkens toward black.
+  const m6 = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color.trim());
+  if (!m6) return color;
+  const target = amount > 0 ? 255 : 0;
+  const t = Math.abs(amount);
+  const ch = [m6[1], m6[2], m6[3]].map((h) => {
+    const v = parseInt(h, 16);
+    return Math.round(v + (target - v) * t);
+  });
+  return `rgb(${ch[0]},${ch[1]},${ch[2]})`;
+}
+
 function draw() {
   if (!ctx) return;
+  const c = ctx;
   const w = boardW;
   const h = boardH;
-  ctx.clearRect(0, 0, w, h);
+  const t = performance.now() / 1000;
+  c.clearRect(0, 0, w, h);
 
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#1c1815');
-  grad.addColorStop(0.5, '#181410');
-  grad.addColorStop(1, '#1c1815');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
+  // Ice sheet: cool navy with a spotlight in the middle.
+  const base = c.createLinearGradient(0, 0, 0, h);
+  base.addColorStop(0, '#0d1b2e');
+  base.addColorStop(0.5, '#132a45');
+  base.addColorStop(1, '#0d1b2e');
+  c.fillStyle = base;
+  c.fillRect(0, 0, w, h);
+  const spot = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, h * 0.6);
+  spot.addColorStop(0, 'rgba(125, 211, 252, 0.16)');
+  spot.addColorStop(1, 'rgba(125, 211, 252, 0)');
+  c.fillStyle = spot;
+  c.fillRect(0, 0, w, h);
+
+  // Faint skate-scratch lines for texture.
+  c.save();
+  c.strokeStyle = 'rgba(186, 230, 253, 0.035)';
+  c.lineWidth = 1;
+  for (let i = -h; i < w + h; i += 22) {
+    c.beginPath();
+    c.moveTo(i, 0);
+    c.lineTo(i + h * 0.35, h);
+    c.stroke();
+  }
+  c.restore();
 
   const zr = zoneRects();
-  drawZone(zr.topFree, playerColor(topSeat), 'FREE', false);
-  drawZone(zr.topSeatDrop, playerColor(topSeat), 'DROP', true);
-  drawZone(zr.bottomSeatDrop, playerColor(bottomSeat), 'DROP', true);
-  drawZone(zr.bottomFree, playerColor(bottomSeat), 'FREE', false);
+  drawZone(zr.topFree, playerColor(topSeat), 'LAUNCH', false, true);
+  drawZone(zr.topSeatDrop, playerColor(topSeat), 'SCORE', true, false);
+  drawZone(zr.bottomSeatDrop, playerColor(bottomSeat), 'SCORE', true, true);
+  drawZone(zr.bottomFree, playerColor(bottomSeat), 'LAUNCH', false, false);
 
-  ctx.strokeStyle = 'rgba(237,231,219,0.15)';
-  ctx.setLineDash([4, 6]);
-  ctx.beginPath();
-  ctx.moveTo(0, h / 2);
-  ctx.lineTo(w, h / 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Centre line + face-off circle.
+  c.save();
+  c.shadowColor = 'rgba(56, 189, 248, 0.8)';
+  c.shadowBlur = 8;
+  c.strokeStyle = 'rgba(125, 211, 252, 0.45)';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.moveTo(0, h / 2);
+  c.lineTo(w, h / 2);
+  c.stroke();
+  c.beginPath();
+  c.arc(w / 2, h / 2, Math.min(w, h) * 0.12, 0, Math.PI * 2);
+  c.stroke();
+  c.fillStyle = 'rgba(125, 211, 252, 0.6)';
+  c.beginPath();
+  c.arc(w / 2, h / 2, 3, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
 
-  ctx.strokeStyle = 'rgba(237,231,219,0.3)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, w - 2, h - 2);
+  // Rink boards.
+  c.save();
+  c.strokeStyle = 'rgba(226, 240, 255, 0.55)';
+  c.lineWidth = 3;
+  c.shadowColor = 'rgba(56, 189, 248, 0.6)';
+  c.shadowBlur = 10;
+  c.strokeRect(1.5, 1.5, w - 3, h - 3);
+  c.restore();
+
+  const shootable = isMyTurnToShoot();
+
+  // Motion trails.
+  discEntries.forEach((d) => {
+    if (!d.alive) {
+      trails.delete(d.id);
+      return;
+    }
+    const p = d.body.position;
+    const speed = Math.hypot(d.body.velocity.x, d.body.velocity.y);
+    const trail = trails.get(d.id) ?? [];
+    if (speed > 1.2) {
+      trail.push({ x: p.x, y: p.y });
+      if (trail.length > TRAIL_LEN) trail.shift();
+    } else if (trail.length) {
+      trail.shift();
+    }
+    trails.set(d.id, trail);
+    if (trail.length < 2) return;
+    const color = playerColor(d.owner);
+    for (let i = 1; i < trail.length; i++) {
+      const a = i / trail.length;
+      c.beginPath();
+      c.moveTo(trail[i - 1].x, trail[i - 1].y);
+      c.lineTo(trail[i].x, trail[i].y);
+      c.strokeStyle = withAlpha(color, a * 0.45);
+      c.lineWidth = d.r * 1.4 * a;
+      c.lineCap = 'round';
+      c.stroke();
+    }
+  });
 
   discEntries.forEach((d) => {
     if (!d.alive) return;
     const p = d.body.position;
-    ctx!.beginPath();
-    ctx!.arc(p.x, p.y, d.r, 0, Math.PI * 2);
-    ctx!.fillStyle = playerColor(d.owner);
-    ctx!.fill();
-
-    const shootable = isMyTurnToShoot();
+    const r = d.r;
+    const color = playerColor(d.owner);
     const isActive = d.owner === currentSeat && !d.used && !d.resting && !animating && shootable;
-    ctx!.lineWidth = d.cls === 'heavy' ? 4 : d.cls === 'medium' ? 2.5 : 1.5;
-    ctx!.strokeStyle = d.resting ? '#f2d675' : isActive ? '#ede7db' : 'rgba(0,0,0,0.4)';
-    ctx!.stroke();
 
-    ctx!.beginPath();
-    ctx!.arc(p.x - d.r * 0.3, p.y - d.r * 0.3, d.r * 0.32, 0, Math.PI * 2);
-    ctx!.fillStyle = 'rgba(255,255,255,0.22)';
-    ctx!.fill();
+    // Ground shadow.
+    c.beginPath();
+    c.ellipse(p.x + r * 0.12, p.y + r * 0.28, r * 1.02, r * 0.9, 0, 0, Math.PI * 2);
+    c.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    c.fill();
 
-    const pipR = Math.max(1.5, d.r * 0.09);
+    // Halo: pulsing for discs you can flick right now, gold for scored.
+    if (isActive || d.resting) {
+      const pulse = isActive ? 0.5 + 0.5 * Math.sin(t * 5) : 1;
+      c.save();
+      c.shadowColor = d.resting ? '#facc15' : color;
+      c.shadowBlur = 18 + pulse * 10;
+      c.beginPath();
+      c.arc(p.x, p.y, r + 3 + pulse * 2, 0, Math.PI * 2);
+      c.strokeStyle = d.resting ? 'rgba(250, 204, 21, 0.9)' : 'rgba(255, 255, 255, 0.85)';
+      c.lineWidth = 2;
+      c.stroke();
+      c.restore();
+    }
+
+    // Puck body: lit from the top-left.
+    const body = c.createRadialGradient(p.x - r * 0.35, p.y - r * 0.4, r * 0.1, p.x, p.y, r);
+    body.addColorStop(0, shade(color, 0.45));
+    body.addColorStop(0.55, color);
+    body.addColorStop(1, shade(color, -0.45));
+    c.beginPath();
+    c.arc(p.x, p.y, r, 0, Math.PI * 2);
+    c.fillStyle = body;
+    c.fill();
+
+    // Rim: thicker for heavier discs, so weight reads at a glance.
+    c.lineWidth = d.cls === 'heavy' ? 4 : d.cls === 'medium' ? 2.5 : 1.5;
+    c.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    c.stroke();
+
+    // Inner groove ring.
+    c.beginPath();
+    c.arc(p.x, p.y, r * 0.66, 0, Math.PI * 2);
+    c.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+    c.lineWidth = Math.max(1, r * 0.06);
+    c.stroke();
+
+    // Specular highlight.
+    c.beginPath();
+    c.ellipse(p.x - r * 0.32, p.y - r * 0.38, r * 0.34, r * 0.2, -0.6, 0, Math.PI * 2);
+    c.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    c.fill();
+
+    // Remaining-uses pips.
+    const pipR = Math.max(1.5, r * 0.09);
     const pipGap = pipR * 2.6;
     const totalW = pipGap * (MAX_USES - 1);
     for (let i = 0; i < MAX_USES; i++) {
-      ctx!.beginPath();
-      ctx!.arc(p.x - totalW / 2 + i * pipGap, p.y + d.r * 0.62, pipR, 0, Math.PI * 2);
-      ctx!.fillStyle = i < d.usesLeft ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.45)';
-      ctx!.fill();
+      c.beginPath();
+      c.arc(p.x - totalW / 2 + i * pipGap, p.y + r * 0.62, pipR, 0, Math.PI * 2);
+      c.fillStyle = i < d.usesLeft ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.5)';
+      c.fill();
     }
   });
 }
@@ -647,19 +781,65 @@ function drawZone(
   color: string,
   label: string,
   isDrop: boolean,
+  fadeDown: boolean,
 ) {
   if (!ctx) return;
-  ctx.fillStyle = color + (isDrop ? '1c' : '10');
-  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-  ctx.strokeStyle = color + '55';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash(isDrop ? [] : [3, 5]);
-  ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
-  ctx.setLineDash([]);
-  ctx.font = '10px monospace';
-  ctx.fillStyle = color + '99';
-  ctx.textAlign = 'center';
-  ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 3);
+  const c = ctx;
+  c.save();
+  // Glowing band that fades toward the middle of the rink.
+  const g = c.createLinearGradient(0, rect.y, 0, rect.y + rect.h);
+  const strong = withAlpha(color, isDrop ? 0.38 : 0.22);
+  const weak = withAlpha(color, isDrop ? 0.08 : 0.04);
+  g.addColorStop(0, fadeDown ? strong : weak);
+  g.addColorStop(1, fadeDown ? weak : strong);
+  if (!color.startsWith('#')) c.globalAlpha = isDrop ? 0.3 : 0.18;
+  c.fillStyle = g;
+  c.fillRect(rect.x, rect.y, rect.w, rect.h);
+  c.globalAlpha = 1;
+
+  // Neon edge lines.
+  c.shadowColor = color;
+  c.shadowBlur = isDrop ? 12 : 6;
+  c.strokeStyle = withAlpha(color, isDrop ? 0.9 : 0.5);
+  c.lineWidth = isDrop ? 2.5 : 1.5;
+  c.setLineDash(isDrop ? [] : [6, 6]);
+  c.beginPath();
+  c.moveTo(rect.x, rect.y + 1);
+  c.lineTo(rect.x + rect.w, rect.y + 1);
+  c.moveTo(rect.x, rect.y + rect.h - 1);
+  c.lineTo(rect.x + rect.w, rect.y + rect.h - 1);
+  c.stroke();
+  c.setLineDash([]);
+  c.shadowBlur = 0;
+
+  // Chevrons pointing down-table for launch pads; big label for scoring.
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  if (isDrop) {
+    c.font = `800 ${Math.max(11, rect.h * 0.22)}px 'Exo 2', system-ui, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = withAlpha(color, 0.55);
+    if (!color.startsWith('#')) c.globalAlpha = 0.55;
+    const spaced = label.split('').join(' ');
+    c.fillText(`★ ${spaced} ★`, cx, cy);
+    c.globalAlpha = 1;
+  } else {
+    c.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    c.lineWidth = 2;
+    const dir = fadeDown ? 1 : -1;
+    for (const x of [rect.w * 0.12, rect.w * 0.88]) {
+      for (let k = 0; k < 2; k++) {
+        const yy = cy + dir * (k * 6 - 3);
+        c.beginPath();
+        c.moveTo(x - 6, yy - dir * 4);
+        c.lineTo(x, yy + dir * 2);
+        c.lineTo(x + 6, yy - dir * 4);
+        c.stroke();
+      }
+    }
+  }
+  c.restore();
 }
 
 // ---------------- Input: drag / swipe -----------------------------------
@@ -967,17 +1147,21 @@ function handleMenu() {
 }
 
 .olo-wordmark {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-weight: 700;
-  font-style: italic;
-  font-size: clamp(48px, 12vw, 84px);
-  letter-spacing: -2px;
+  font-weight: 900;
+  font-size: clamp(56px, 14vw, 96px);
+  letter-spacing: 0.04em;
   line-height: 0.9;
-  color: var(--color-text);
+  color: #e0f2fe;
+  text-shadow:
+    0 0 18px rgba(56, 189, 248, 0.7),
+    0 6px 0 #1e3a5f;
 }
 
 .olo-wordmark span {
-  color: #e0562a;
+  color: #fb923c;
+  text-shadow:
+    0 0 18px rgba(251, 146, 60, 0.7),
+    0 6px 0 #7c2d12;
 }
 
 .olo-tagline {
@@ -1015,10 +1199,11 @@ function handleMenu() {
 }
 
 .olo-turn {
-  font-family: Georgia, serif;
-  font-style: italic;
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
   color: var(--color-text);
+  text-shadow: 0 0 14px rgba(56, 189, 248, 0.55);
 }
 
 .olo-scores {
@@ -1030,24 +1215,32 @@ function handleMenu() {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.2rem 0.6rem;
+  padding: 0.3rem 0.8rem;
   border: 1px solid var(--color-border);
   border-radius: 999px;
-  font-size: 0.85rem;
+  background: rgba(13, 27, 46, 0.7);
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
-  opacity: 0.6;
+  opacity: 0.65;
+  transition: all 0.2s ease;
 }
 
 .olo-score-chip.current {
   opacity: 1;
-  border-color: var(--color-primary);
+  border-color: rgba(125, 211, 252, 0.7);
   color: var(--color-text);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
 }
 
 .olo-dot {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
+  box-shadow:
+    inset 0 -2px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5);
 }
 
 .olo-board-wrap {
@@ -1057,11 +1250,14 @@ function handleMenu() {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 18px;
   overflow: hidden;
+  background: #0d1b2e;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 20px 40px -16px rgba(0, 0, 0, 0.6);
+    0 0 0 3px #1e3a5f,
+    0 0 0 5px rgba(125, 211, 252, 0.25),
+    0 0 40px rgba(56, 189, 248, 0.2),
+    0 26px 50px -16px rgba(0, 0, 0, 0.7);
 }
 
 .olo-canvas {
@@ -1071,6 +1267,8 @@ function handleMenu() {
 .olo-toast {
   position: absolute;
   top: 10px;
+  font-weight: 800;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.5);
   left: 50%;
   transform: translateX(-50%) translateY(-8px);
   font-size: 0.7rem;
@@ -1094,7 +1292,7 @@ function handleMenu() {
 .olo-win-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(20, 17, 15, 0.92);
+  background: radial-gradient(circle at 50% 40%, rgba(30, 58, 95, 0.95), rgba(8, 15, 28, 0.96));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1105,10 +1303,9 @@ function handleMenu() {
 }
 
 .olo-win-text {
-  font-family: Georgia, serif;
-  font-style: italic;
-  font-weight: 700;
-  font-size: 2rem;
-  color: var(--color-text);
+  font-weight: 900;
+  font-size: 2.2rem;
+  color: #fde68a;
+  text-shadow: 0 0 22px rgba(250, 204, 21, 0.6);
 }
 </style>

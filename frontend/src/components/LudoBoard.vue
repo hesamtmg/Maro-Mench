@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { prettyColor } from '../lib/player-colors';
 import type { RoomPlayer } from '../types';
 import {
   ENTRY_OFFSETS,
@@ -47,10 +48,10 @@ const SEAT_FALLBACK_COLORS = ['#e33e3e', '#3aa15c', '#e8b93e', '#3f6fd1'];
 const YARD_CLASSES = ['yard-0', 'yard-1', 'yard-2', 'yard-3'];
 
 function colorForSeat(seatIndex: number): string {
-  return (
+  return prettyColor(
     props.players.find((p) => p.seatIndex === seatIndex)?.color ??
-    SEAT_FALLBACK_COLORS[seatIndex] ??
-    '#999'
+      SEAT_FALLBACK_COLORS[seatIndex],
+    '#999',
   );
 }
 
@@ -88,8 +89,8 @@ const trackTokens = computed(() => {
         key: `${player.seatIndex}-${token.tokenId}`,
         seatIndex: player.seatIndex,
         token,
-        color: player.color ?? SEAT_FALLBACK_COLORS[player.seatIndex],
-        displayName: player.displayName,
+        color: colorForSeat(player.seatIndex),
+        displayName: player.displayName ?? '',
         selectable: canSelectNow.value && myTokenIds.value.has(token.tokenId),
         row: cell[0],
         col: cell[1],
@@ -225,8 +226,9 @@ function onTokenClick(occupant: OccupiedCell) {
         v-for="seat in [0, 1, 2, 3]"
         :key="`yard-${seat}`"
         class="yard"
-        :class="YARD_CLASSES[seat]"
+        :class="[YARD_CLASSES[seat], { 'yard-active': seat === props.currentTurnSeat }]"
       >
+        <span class="yard-name">{{ props.players.find((p) => p.seatIndex === seat)?.displayName ?? '' }}</span>
         <div class="yard-inner">
           <div
             v-for="(occupant, slotIndex) in yardSlots(seat)"
@@ -255,6 +257,7 @@ function onTokenClick(occupant: OccupiedCell) {
         <span class="center-triangle center-triangle-top" />
         <span class="center-triangle center-triangle-right" />
         <span class="center-triangle center-triangle-bottom" />
+        <span class="center-medallion" aria-hidden="true">🏠</span>
       </div>
 
       <!-- Track cells (ring + home lanes) -->
@@ -367,19 +370,26 @@ function onTokenClick(occupant: OccupiedCell) {
   display: grid;
   grid-template-columns: repeat(var(--grid-size), 1fr);
   grid-template-rows: repeat(var(--grid-size), 1fr);
-  width: 100%;
+  width: calc(100% - 28px);
+  margin: 14px;
   aspect-ratio: 1;
-  background: #fdfaf3;
-  border: 2px solid #2b2b2b;
-  border-radius: 12px;
+  background: #fffaf0;
+  border: 2px solid #2a1608;
+  border-radius: 14px;
   overflow: hidden;
   position: relative;
   /* Slight tabletop tilt plus a soft shadow beneath, so the board reads
      as a physical object resting on a surface rather than a flat image. */
   transform: rotateX(6deg);
   transform-origin: center bottom;
+  /* Wooden rim drawn with spread shadows (padding would shift the
+     absolutely-positioned token overlays off the grid). */
   box-shadow:
-    0 24px 36px rgba(0, 0, 0, 0.4),
+    0 0 0 6px #8a5228,
+    0 0 0 8px #5a3216,
+    0 0 0 14px #a86a36,
+    0 0 0 15px #3b2210,
+    0 34px 50px rgba(0, 0, 0, 0.55),
     0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
@@ -387,6 +397,53 @@ function onTokenClick(occupant: OccupiedCell) {
 .yard {
   display: grid;
   place-items: center;
+  position: relative;
+  /* Diagonal sheen over each yard's colour. */
+  background-image:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.22), transparent 45%, rgba(0, 0, 0, 0.18)) !important;
+  transition: filter 0.3s ease;
+}
+
+.yard-name {
+  position: absolute;
+  top: 3%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: clamp(0.5rem, 1.3vw, 0.8rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Whoever's turn it is: their yard glows and its inner tray pulses. */
+.yard-active {
+  filter: saturate(1.25) brightness(1.08);
+  z-index: 1;
+}
+
+.yard-active .yard-inner {
+  animation: yard-glow 1.4s ease-in-out infinite;
+}
+
+@keyframes yard-glow {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 2px 5px rgba(0, 0, 0, 0.25),
+      0 0 0 3px rgba(255, 255, 255, 0.5);
+  }
+  50% {
+    box-shadow:
+      inset 0 2px 5px rgba(0, 0, 0, 0.25),
+      0 0 0 6px rgba(255, 255, 255, 0.85),
+      0 0 22px rgba(255, 255, 255, 0.8);
+  }
 }
 .yard-0 {
   grid-row: 1 / 7;
@@ -412,8 +469,8 @@ function onTokenClick(occupant: OccupiedCell) {
 .yard-inner {
   width: 76%;
   height: 76%;
-  background: #fdfaf3;
-  border-radius: 14%;
+  background: radial-gradient(circle at 50% 35%, #ffffff, #f3ead6);
+  border-radius: 18%;
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
@@ -470,8 +527,9 @@ function onTokenClick(occupant: OccupiedCell) {
 
 /* Track cells */
 .track-cell {
-  border: 1px solid #e2dbc9;
-  background: #fdfaf3;
+  border: 1px solid #e6dcc4;
+  background: #fffaf0;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -481,10 +539,12 @@ function onTokenClick(occupant: OccupiedCell) {
 .track-cell.safe::before {
   content: '★';
   position: absolute;
-  font-size: 0.55rem;
-  color: #b8ae94;
-  top: 1px;
-  left: 2px;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(0.7rem, 2.2vw, 1.4rem);
+  color: #d6c49a;
+  text-shadow: 0 1px 0 #fff;
 }
 
 /* Entry/"station" squares have a vivid solid background (below), so the
@@ -493,8 +553,33 @@ function onTokenClick(occupant: OccupiedCell) {
 .track-cell.entry-1.safe::before,
 .track-cell.entry-2.safe::before,
 .track-cell.entry-3.safe::before {
-  color: #fff;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Coloured lanes/entries get a soft top sheen too. */
+.track-cell[class*='lane-'],
+.track-cell[class*='entry-'] {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(0, 0, 0, 0.08));
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.center-medallion {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  font-size: clamp(0.8rem, 2.6vw, 1.6rem);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #efe4c8);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.85),
+    0 4px 10px rgba(0, 0, 0, 0.35);
+  z-index: 1;
 }
 
 /* Home-stretch corridors: solid, vivid colors -- an actual colored road
@@ -627,6 +712,19 @@ function onTokenClick(occupant: OccupiedCell) {
   overflow: hidden;
 }
 
+/* Classic Ludo piece: a white ring inset on the glossy disc. */
+.token::before {
+  content: '';
+  position: absolute;
+  inset: 24%;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.35),
+    0 1px 1px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
 .token::after {
   content: '';
   position: absolute;
@@ -649,8 +747,10 @@ function onTokenClick(occupant: OccupiedCell) {
 }
 
 .token.selectable {
+  overflow: visible;
   box-shadow:
-    0 0 0 3px rgba(168, 85, 247, 0.7),
+    0 0 0 3px #fff,
+    0 0 14px 4px rgba(255, 255, 255, 0.9),
     0 3px 6px rgba(0, 0, 0, 0.5),
     inset 0 -5px 7px rgba(0, 0, 0, 0.4),
     inset 0 3px 4px rgba(255, 255, 255, 0.45);

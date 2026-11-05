@@ -32,7 +32,7 @@ function gridPos(square: number) {
 
 // Diagonal 5-color patchwork, matching the classic wooden-board look
 // (colored squares, not a plain 2-color checkerboard).
-const CELL_COLORS = ['#e6483c', '#f0b429', '#2f6fed', '#3aa15c', '#f5ecd7'];
+const CELL_COLORS = ['#ef5a4c', '#f7bb3a', '#3b7cf0', '#3fb36a', '#fbf3df'];
 
 function cellColor(square: number): string {
   const { row, col } = gridPos(square);
@@ -42,7 +42,7 @@ function cellColor(square: number): string {
 // Cream squares need dark text; the saturated colors read better with
 // white text, so the number's color follows the cell it sits on.
 function textColor(square: number): string {
-  return cellColor(square) === '#f5ecd7' ? '#2b2b2b' : '#fff';
+  return cellColor(square) === '#fbf3df' ? '#5b4a2e' : '#fff';
 }
 
 // --- Move animation ------------------------------------------------
@@ -177,6 +177,7 @@ const tokenPositions = computed(() => {
       return {
         userId: player.userId,
         displayName: player.displayName,
+        initial: (player.displayName ?? '?').charAt(0).toUpperCase(),
         seatIndex: player.seatIndex,
         color: player.color ?? '#4f46e5',
         xPercent: center.xPercent + spread.dx,
@@ -205,7 +206,7 @@ const SNAKE_BELLY_COLORS = [
   '#e77b6b',
   '#f4a460',
 ];
-const LADDER_COLORS = ['#8b5a2b', '#6b4226', '#a0672f'];
+const LADDER_COLORS = ['#c48a4a', '#b0743a', '#d29a58'];
 
 // Head is drawn as an ellipse (not a plain circle) so it reads as an
 // actual head shape: longer along the direction of travel, narrower
@@ -327,6 +328,8 @@ const ladderShapes = computed(() => {
             }"
           >
             <span class="square-index">{{ square }}</span>
+            <span v-if="square === 100" class="square-badge" aria-hidden="true">👑</span>
+            <span v-else-if="square === 1" class="square-badge square-badge-start">START</span>
           </div>
         </div>
 
@@ -334,7 +337,33 @@ const ladderShapes = computed(() => {
              over the grid using percent-based coordinates so they scale
              with the board regardless of pixel size. -->
         <svg class="sl-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <g v-for="ladder in ladderShapes" :key="ladder.key" class="ladder">
+          <defs>
+            <filter id="sl-soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0.4" dy="0.8" stdDeviation="0.5" flood-color="#000" flood-opacity="0.45" />
+            </filter>
+          </defs>
+          <g v-for="ladder in ladderShapes" :key="ladder.key" class="ladder" filter="url(#sl-soft-shadow)">
+            <!-- Dark outline under each rail and rung, then the wood
+                 colour, then a thin highlight: reads as a rounded wooden
+                 pole rather than a flat stroke. -->
+            <line
+              v-for="(rung, i) in ladder.rungs"
+              :key="`rs-${i}`"
+              :x1="rung[0].x"
+              :y1="rung[0].y"
+              :x2="rung[1].x"
+              :y2="rung[1].y"
+              class="ladder-outline ladder-outline-rung"
+            />
+            <line
+              v-for="(rail, i) in [ladder.rail1, ladder.rail2]"
+              :key="`ro-${i}`"
+              :x1="rail[0].x"
+              :y1="rail[0].y"
+              :x2="rail[1].x"
+              :y2="rail[1].y"
+              class="ladder-outline"
+            />
             <line
               :x1="ladder.rail1[0].x"
               :y1="ladder.rail1[0].y"
@@ -361,13 +390,24 @@ const ladderShapes = computed(() => {
               class="ladder-rung"
               :style="{ stroke: ladder.color }"
             />
+            <line
+              v-for="(rail, i) in [ladder.rail1, ladder.rail2]"
+              :key="`sh-${i}`"
+              :x1="rail[0].x"
+              :y1="rail[0].y"
+              :x2="rail[1].x"
+              :y2="rail[1].y"
+              class="ladder-shine"
+            />
           </g>
 
           <g v-for="snake in snakePaths" :key="snake.key" class="snake">
             <!-- Body: a thick colored stroke plus a thin lighter stripe on
                  top to fake a rounded belly, so it reads as a tube rather
                  than a flat line. -->
+            <path :d="snake.d" class="snake-outline" />
             <path :d="snake.d" class="snake-body" :style="{ stroke: snake.color }" />
+            <path :d="snake.d" class="snake-scales" />
             <path
               :d="snake.d"
               class="snake-belly"
@@ -418,14 +458,16 @@ const ladderShapes = computed(() => {
             :class="{
               'token-bitten': specialEffect[token.seatIndex] === 'snake',
               'token-climbing': specialEffect[token.seatIndex] === 'ladder',
+              'token-active': token.seatIndex === props.currentTurnSeat,
             }"
             :title="token.displayName"
             :style="{
               left: `${token.xPercent}%`,
               top: `${token.yPercent}%`,
               background: token.color,
+              '--token-color': token.color,
             }"
-          />
+          ><span class="token-initial">{{ token.initial }}</span></span>
         </div>
       </div>
     </div>
@@ -468,18 +510,46 @@ const ladderShapes = computed(() => {
   width: 100%;
   aspect-ratio: 1;
   box-sizing: border-box;
-  padding: 3%;
-  background: linear-gradient(155deg, #e8c27a, #c9964f);
-  border: 3px solid #2b2b2b;
-  border-radius: 16px;
+  padding: 3.2%;
+  /* Polished wooden frame: fine grain stripes over a warm gradient. */
+  background:
+    repeating-linear-gradient(
+      100deg,
+      rgba(255, 255, 255, 0.05) 0 2px,
+      rgba(0, 0, 0, 0.05) 2px 5px,
+      transparent 5px 11px
+    ),
+    linear-gradient(155deg, #c98a4b 0%, #9a5a2a 45%, #7a4320 100%);
+  border: 2px solid #3b2210;
+  border-radius: 22px;
   /* Slight tabletop tilt plus a soft shadow beneath, so the board reads
      as a physical object resting on a surface rather than a flat image. */
   transform: rotateX(6deg);
   transform-origin: center bottom;
   box-shadow:
-    0 24px 36px rgba(0, 0, 0, 0.4),
+    0 30px 50px rgba(0, 0, 0, 0.5),
     0 4px 10px rgba(0, 0, 0, 0.3),
-    inset 0 0 0 2px rgba(255, 255, 255, 0.25);
+    inset 0 2px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -4px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* Brass corner bolts. */
+.sl-board::before,
+.sl-board::after {
+  content: '';
+  position: absolute;
+  width: 1.4%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  top: 1.1%;
+  background: radial-gradient(circle at 35% 30%, #fff3c4, #d4a537 55%, #7a5a12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.sl-board::before {
+  left: 1.1%;
+}
+.sl-board::after {
+  right: 1.1%;
 }
 
 .sl-frame {
@@ -494,9 +564,11 @@ const ladderShapes = computed(() => {
   display: grid;
   grid-template-columns: repeat(10, 1fr);
   grid-template-rows: repeat(10, 1fr);
-  border-radius: 6px;
+  border-radius: 10px;
   overflow: hidden;
-  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 0 0 3px #3b2210,
+    0 0 0 5px rgba(255, 220, 160, 0.35);
 }
 
 .sl-square {
@@ -506,19 +578,61 @@ const ladderShapes = computed(() => {
   justify-content: center;
   flex-wrap: wrap;
   gap: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  /* Glossy tile: a light sheen from the top-left plus a soft inner
+     shadow at the bottom, so each square looks like a raised tile. */
+  background-image: radial-gradient(
+    120% 90% at 20% 10%,
+    rgba(255, 255, 255, 0.32),
+    transparent 55%
+  ) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    inset 0 -2px 3px rgba(0, 0, 0, 0.15);
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -3px 4px rgba(0, 0, 0, 0.16);
 }
 
 .square-index {
   position: absolute;
-  top: 2%;
-  left: 4%;
-  font-size: 0.65rem;
+  top: 4%;
+  left: 6%;
+  font-size: clamp(0.5rem, 1.2vw, 0.72rem);
   font-weight: 800;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+.square-badge {
+  font-size: clamp(0.9rem, 2.6vw, 1.6rem);
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
+  animation: badge-float 2.4s ease-in-out infinite;
+}
+
+.square-badge-start {
+  font-size: clamp(0.45rem, 1vw, 0.62rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.3rem;
+  border-radius: 999px;
+  background: #16a34a;
+  color: #fff;
+  animation: none;
+}
+
+@keyframes badge-float {
+  50% {
+    transform: translateY(-3px) rotate(-6deg);
+  }
+}
+
+.sl-snake-head {
+  box-shadow:
+    inset 0 0 0 2px rgba(127, 29, 29, 0.45),
+    inset 0 -3px 4px rgba(0, 0, 0, 0.16);
+}
+
+.sl-ladder-bottom {
+  box-shadow:
+    inset 0 0 0 2px rgba(120, 72, 20, 0.5),
+    inset 0 -3px 4px rgba(0, 0, 0, 0.16);
 }
 
 .token-dot,
@@ -550,9 +664,13 @@ const ladderShapes = computed(() => {
    3D shading actually reads at board scale. */
 .token-dot {
   position: absolute;
-  width: 26px;
-  height: 26px;
+  width: clamp(20px, 4.4%, 36px);
+  aspect-ratio: 1;
+  height: auto;
+  display: grid;
+  place-items: center;
   overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.9);
   transform: translate(-50%, -50%);
   transition:
     left 0.14s linear,
@@ -591,6 +709,41 @@ const ladderShapes = computed(() => {
     transparent 26%
   );
   pointer-events: none;
+}
+
+/* Player initial printed on the piece. */
+.token-initial {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(0.55rem, 1.3vw, 0.85rem);
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  line-height: 1;
+}
+
+/* Whoever's turn it is gets a pulsing halo, so it's obvious which piece
+   is about to move. */
+.token-dot.token-active {
+  z-index: 3;
+  overflow: visible;
+  animation: token-active-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes token-active-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 color-mix(in srgb, var(--token-color) 70%, transparent),
+      0 4px 6px rgba(0, 0, 0, 0.6),
+      inset 0 -6px 8px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 0 8px color-mix(in srgb, var(--token-color) 0%, transparent),
+      0 6px 10px rgba(0, 0, 0, 0.55),
+      inset 0 -6px 8px rgba(0, 0, 0, 0.45);
+  }
 }
 
 @keyframes pop-in {
@@ -666,6 +819,23 @@ const ladderShapes = computed(() => {
   z-index: 1;
 }
 
+.snake-outline {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 4.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Dotted darker spots along the body read as scales/markings. */
+.snake-scales {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.22);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-dasharray: 0.01 2.6;
+}
+
 .snake-body {
   fill: none;
   stroke-width: 3.6;
@@ -703,15 +873,30 @@ const ladderShapes = computed(() => {
   stroke-width: 0.6;
 }
 
-.ladder-rail {
-  stroke-width: 1.4;
+.ladder-outline {
+  stroke: #2a1608;
+  stroke-width: 2.2;
   stroke-linecap: round;
-  opacity: 0.9;
+}
+
+.ladder-outline-rung {
+  stroke-width: 1.8;
+}
+
+.ladder-rail {
+  stroke-width: 1.5;
+  stroke-linecap: round;
 }
 
 .ladder-rung {
   stroke-width: 1.1;
-  opacity: 0.9;
+  stroke-linecap: round;
+}
+
+.ladder-shine {
+  stroke: rgba(255, 230, 180, 0.55);
+  stroke-width: 0.4;
+  stroke-linecap: round;
 }
 
 .player-row {

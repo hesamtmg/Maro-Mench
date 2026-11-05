@@ -17,6 +17,21 @@ import { UsersModule } from './modules/users/users.module';
       isGlobal: true,
       envFilePath: process.env.NODE_ENV === 'test' ? '.env.test' : '.env',
       load: [typeormConfig],
+      // Fail at startup with a readable message instead of passport-jwt's
+      // "JwtStrategy requires a secret or key" deep in the DI stack.
+      validate: (config: Record<string, unknown>) => {
+        const missing = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'].filter(
+          (key) => !config[key],
+        );
+        if (missing.length) {
+          throw new Error(
+            `Missing required environment variable(s): ${missing.join(', ')}. ` +
+              'Copy backend/.env.example to backend/.env (local) or to .env in ' +
+              'the repo root (docker compose) and set them.',
+          );
+        }
+        return config;
+      },
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

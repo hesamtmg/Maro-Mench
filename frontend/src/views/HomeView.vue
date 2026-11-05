@@ -43,6 +43,16 @@ const conquestDots = Array.from({ length: 12 }, (_, i) => ({
   top: `${10 + ((i * 53) % 80)}%`,
 }));
 
+// Accent colour, tagline and player count per game -- the same accents
+// RoomView uses for each game's header and ambient glow.
+const GAME_META: Record<string, { accent: string; tagline: string; players: string }> = {
+  ludo: { accent: '#f43f5e', tagline: 'Race all four pieces home', players: '2–4' },
+  snakes_ladders: { accent: '#22c55e', tagline: 'Climb ladders, dodge snakes', players: '2–16' },
+  olo: { accent: '#38bdf8', tagline: 'Flick your discs to score', players: '2' },
+  monopoly: { accent: '#f59e0b', tagline: 'Buy, build and bankrupt', players: '2–6' },
+  conquest: { accent: '#a855f7', tagline: 'Conquer the world map', players: '2–6' },
+};
+
 function chooseGame(gameTypeCode: GameTypeCode) {
   void router.push({ name: 'lobby', query: { game: gameTypeCode } });
 }
@@ -56,7 +66,7 @@ async function handleLogout() {
 <template>
   <div class="page-container-wide">
     <div class="row-between" style="margin-bottom: 1.5rem">
-      <h1>GIMOO</h1>
+      <h1 class="brand">GIMOO</h1>
       <div class="row">
         <span class="text-muted">{{ authStore.user?.displayName }}</span>
         <RouterLink :to="{ name: 'stats' }" class="btn btn-secondary">🏆 Stats</RouterLink>
@@ -64,20 +74,23 @@ async function handleLogout() {
       </div>
     </div>
 
-    <p class="text-center text-muted" style="margin-bottom: 2rem">
-      Pick a game to get started
-    </p>
+    <div class="hero">
+      <h2 class="hero-title">Pick a game</h2>
+      <p class="text-muted hero-sub">Play with friends online: create a room, share the code, roll.</p>
+    </div>
 
     <div class="game-picker">
-      <button class="game-tile" @click="chooseGame('ludo')">
+      <button class="game-tile" :style="{ '--accent': GAME_META.ludo.accent }" @click="chooseGame('ludo')">
         <span class="game-tile-pic ludo-pic" aria-hidden="true">
           <span class="ludo-pic-hub" />
         </span>
         <strong>Ludo</strong>
+        <span class="game-tile-tagline">{{ GAME_META.ludo.tagline }}</span>
+        <span class="game-tile-players">👥 {{ GAME_META.ludo.players }} players</span>
 
       </button>
 
-      <button class="game-tile" @click="chooseGame('snakes_ladders')">
+      <button class="game-tile" :style="{ '--accent': GAME_META.snakes_ladders.accent }" @click="chooseGame('snakes_ladders')">
         <span class="game-tile-pic sl-pic" aria-hidden="true">
           <span
             v-for="(color, i) in slSwatch"
@@ -87,23 +100,27 @@ async function handleLogout() {
           />
         </span>
         <strong>Snakes &amp; Ladders</strong>
+        <span class="game-tile-tagline">{{ GAME_META.snakes_ladders.tagline }}</span>
+        <span class="game-tile-players">👥 {{ GAME_META.snakes_ladders.players }} players</span>
 
       </button>
 
       <div class="game-tile-group">
-        <button class="game-tile" @click="chooseGame('olo')">
+        <button class="game-tile" :style="{ '--accent': GAME_META.olo.accent }" @click="chooseGame('olo')">
           <span class="game-tile-pic olo-pic" aria-hidden="true">
             <span class="olo-pic-disc olo-pic-disc-1" />
             <span class="olo-pic-disc olo-pic-disc-2" />
           </span>
           <strong>OLO</strong>
+        <span class="game-tile-tagline">{{ GAME_META.olo.tagline }}</span>
+        <span class="game-tile-players">👥 {{ GAME_META.olo.players }} players</span>
         </button>
         <RouterLink :to="{ name: 'olo-practice' }" class="text-muted practice-link">
-          Practice offline
+          🎯 Practice offline
         </RouterLink>
       </div>
 
-      <button class="game-tile" @click="chooseGame('monopoly')">
+      <button class="game-tile" :style="{ '--accent': GAME_META.monopoly.accent }" @click="chooseGame('monopoly')">
         <span class="game-tile-pic monopoly-pic" aria-hidden="true">
           <span
             v-for="(color, i) in monopolySwatch"
@@ -113,9 +130,11 @@ async function handleLogout() {
           />
         </span>
         <strong>Monopoly</strong>
+        <span class="game-tile-tagline">{{ GAME_META.monopoly.tagline }}</span>
+        <span class="game-tile-players">👥 {{ GAME_META.monopoly.players }} players</span>
       </button>
 
-      <button class="game-tile" @click="chooseGame('conquest')">
+      <button class="game-tile" :style="{ '--accent': GAME_META.conquest.accent }" @click="chooseGame('conquest')">
         <span class="game-tile-pic conquest-pic" aria-hidden="true">
           <span
             v-for="(dot, i) in conquestDots"
@@ -125,6 +144,8 @@ async function handleLogout() {
           />
         </span>
         <strong>Conquest</strong>
+        <span class="game-tile-tagline">{{ GAME_META.conquest.tagline }}</span>
+        <span class="game-tile-players">👥 {{ GAME_META.conquest.players }} players</span>
       </button>
     </div>
   </div>
@@ -149,17 +170,45 @@ async function handleLogout() {
   font-size: 0.8rem;
 }
 
+.brand {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.06em;
+  background: linear-gradient(90deg, #f43f5e, #f59e0b, #22c55e, #38bdf8, #a855f7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.hero-title {
+  margin: 0 0 0.35rem;
+  font-size: 2.2rem;
+}
+
+.hero-sub {
+  margin: 0;
+}
+
 .game-tile {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.6rem;
-  width: 220px;
-  padding: 1.75rem 1.5rem;
-  background: var(--color-surface);
+  gap: 0.45rem;
+  width: 230px;
+  padding: 1.75rem 1.25rem 1.4rem;
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%),
+    var(--color-surface);
   backdrop-filter: blur(8px);
-  border: 1px solid var(--color-border);
-  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--color-border));
+  border-radius: 22px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   font: inherit;
   color: var(--color-text);
@@ -170,21 +219,46 @@ async function handleLogout() {
 }
 
 .game-tile:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  transform: translateY(-6px);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.45),
+    0 0 34px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.game-tile:hover .game-tile-pic {
+  transform: rotate(-4deg) scale(1.06);
 }
 
 .game-tile strong {
-  font-size: 1.15rem;
+  margin-top: 0.4rem;
+  font-size: 1.2rem;
+}
+
+.game-tile-tagline {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.game-tile-players {
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: color-mix(in srgb, var(--accent) 60%, #fff);
 }
 
 .game-tile-pic {
   width: 120px;
   height: 120px;
-  border-radius: 16px;
+  border-radius: 22px;
   overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.2, 1.4, 0.4, 1);
   box-shadow:
-    0 4px 10px rgba(0, 0, 0, 0.35),
+    0 10px 20px rgba(0, 0, 0, 0.4),
+    0 0 0 3px rgba(255, 255, 255, 0.08),
     inset 0 0 0 2px rgba(255, 255, 255, 0.15);
 }
 
@@ -224,7 +298,9 @@ async function handleLogout() {
 
 /* OLO tile: two discs about to collide, echoing the disc-duel concept. */
 .olo-pic {
-  background: #14110f;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(125, 211, 252, 0.25), transparent 60%),
+    linear-gradient(180deg, #0d1b2e, #132a45 50%, #0d1b2e);
   position: relative;
 }
 
@@ -266,7 +342,10 @@ async function handleLogout() {
    territory-graph board. */
 .conquest-pic {
   position: relative;
-  background: var(--color-surface-alt, rgba(255, 255, 255, 0.04));
+  background:
+    repeating-linear-gradient(0deg, rgba(125, 211, 252, 0.08) 0 1px, transparent 1px 15px),
+    repeating-linear-gradient(90deg, rgba(125, 211, 252, 0.08) 0 1px, transparent 1px 15px),
+    radial-gradient(circle at 50% 45%, #16304f, #0a1222 75%);
 }
 
 .conquest-pic-dot {

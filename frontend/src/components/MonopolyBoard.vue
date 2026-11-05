@@ -665,7 +665,7 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
             v-for="p in playersOn(space.index)"
             :key="p.userId"
             class="ms-token"
-            :class="{ 'ms-token-hopping': isHopping(p.seatIndex) }"
+            :class="{ 'ms-token-hopping': isHopping(p.seatIndex), 'ms-token-active': p.seatIndex === currentTurnSeat }"
             :title="p.displayName"
           ><img :src="tokenIconForSeat(p.seatIndex)" alt="" /></span>
         </div>
@@ -676,7 +676,11 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
              wordmark and Chance/Community Chest decks -- purely visual
              (z-index: -1, sits behind every real panel), just filling
              the empty center. -->
-        <div class="ms-center-wordmark" aria-hidden="true">MONOPOLY</div>
+        <div class="ms-center-skyline" aria-hidden="true" />
+        <div class="ms-center-wordmark" aria-hidden="true">
+          <span class="ms-wordmark-top">GIMOO</span>
+          <span class="ms-wordmark-sub">Estates</span>
+        </div>
         <div class="ms-center-card ms-center-card-chance" aria-hidden="true">
           <span class="ms-center-card-mark">?</span>
           <span class="ms-center-card-label">Chance</span>
@@ -1156,18 +1160,21 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
   aspect-ratio: 1;
   /* Thin black rule lines between tiles, like the printed grid lines on
      a real board. */
-  background: #141110;
+  background: #2a2117;
   /* Thick frame + layered shadow reads as a solid physical slab rather
      than a flat image: a bright top bevel, a dark under-bevel, and a
      soft ambient shadow floating it off the page. */
-  border: 6px solid #1b1710;
-  border-radius: calc(var(--radius) + 4px);
+  /* Gold-trimmed dark frame. */
+  border: 8px solid #1f1a12;
+  border-radius: calc(var(--radius) + 6px);
   overflow: hidden;
   box-shadow:
+    0 0 0 2px #c9a24a,
+    0 0 0 5px #3a2c14,
     inset 0 2px 0 rgba(255, 255, 255, 0.12),
     inset 0 -3px 6px rgba(0, 0, 0, 0.55),
-    0 22px 34px rgba(0, 0, 0, 0.55),
-    0 4px 10px rgba(0, 0, 0, 0.4);
+    0 30px 50px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(245, 158, 11, 0.12);
   transform: perspective(1600px) rotateX(8deg);
   transform-origin: center bottom;
 }
@@ -1182,7 +1189,7 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
   /* Classic board look: a uniform cream/ivory card for every tile --
      properties get their group's identity purely from the color band
      (.ms-swatch) on the outer edge, matching the printed board. */
-  background: #f2ecd6;
+  background: linear-gradient(170deg, #fffaf0 0%, #f3ead2 100%);
   padding: 2px 1px;
   overflow: hidden;
   text-align: center;
@@ -1335,6 +1342,9 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
   position: absolute;
   z-index: 1;
   background: var(--group-color, transparent);
+  /* Glossy enamel strip rather than flat paint. */
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.15));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
 }
 .ms-swatch-top {
   top: 0;
@@ -1529,6 +1539,19 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6));
 }
 
+/* The piece whose turn it is stands on a glowing gold base. */
+.ms-token-active {
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 70%, rgba(250, 204, 21, 0.75), rgba(250, 204, 21, 0) 70%);
+  animation: ms-token-glow 1.3s ease-in-out infinite;
+}
+
+@keyframes ms-token-glow {
+  50% {
+    transform: translateY(-2px) scale(1.08);
+  }
+}
+
 /* Bounces the token while it's hopping cell-by-cell toward its new
    position, so a move actually reads as motion instead of a silent
    teleport. */
@@ -1558,7 +1581,12 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
   /* Mint green, like the printed board's center field -- the app's usual
      dark surface color was designed to sit on a dark page and read as a
      near-black void here against the new cream tiles. */
-  background: #cfe8d6;
+  /* Bird's-eye city map: a soft park-green field crossed by faint
+     streets, with a skyline along the bottom edge. */
+  background:
+    repeating-linear-gradient(0deg, rgba(20, 83, 45, 0.07) 0 2px, transparent 2px 46px),
+    repeating-linear-gradient(90deg, rgba(20, 83, 45, 0.07) 0 2px, transparent 2px 46px),
+    radial-gradient(circle at 50% 45%, #f4fbf2 0%, #dcefdc 55%, #bfdcc6 100%);
   color: #1c1710;
   display: flex;
   flex-direction: column;
@@ -1614,22 +1642,67 @@ function swatchSide(index: number): 'top' | 'bottom' | 'left' | 'right' {
   transform: translate(-50%, -50%) rotate(-35deg);
   text-align: center;
   white-space: nowrap;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: clamp(2.1rem, 8.4vw, 4rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+  font-family: var(--font);
   font-weight: 900;
-  letter-spacing: 0.01em;
-  color: #fff;
-  /* A thin dark edge on the letters plus a hard drop below, like the
-     real logo's slightly embossed white lettering. */
-  -webkit-text-stroke: 1px #7a0e12;
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
-  background: linear-gradient(180deg, #e8281f 0%, #c81a1a 100%);
-  border: 3px solid #fdfaf0;
-  border-radius: 2px;
-  padding: 0.15rem 0.5rem;
+  color: #fde68a;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.18), transparent 50%),
+    linear-gradient(180deg, #1e3a5f 0%, #0f1f38 100%);
+  border: 3px solid #e4b94f;
+  border-radius: 14px;
+  padding: 0.35rem 1.1rem 0.45rem;
   box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.25),
-    0 4px 10px rgba(0, 0, 0, 0.4);
+    0 0 0 3px #0f1f38,
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.ms-wordmark-top {
+  font-size: clamp(1.8rem, 7vw, 3.4rem);
+  letter-spacing: 0.08em;
+  background: linear-gradient(180deg, #fff7d1, #f5c542 55%, #b9832a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+.ms-wordmark-sub {
+  margin-top: 0.15rem;
+  font-size: clamp(0.5rem, 1.5vw, 0.85rem);
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: #fde68a;
+}
+
+/* City skyline silhouette along the bottom of the centre field, built
+   from stacked gradients (no image assets). */
+.ms-center-skyline {
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22%;
+  opacity: 0.22;
+  pointer-events: none;
+  background:
+    linear-gradient(#14532d, #14532d) 4% 100% / 7% 55% no-repeat,
+    linear-gradient(#14532d, #14532d) 12% 100% / 5% 80% no-repeat,
+    linear-gradient(#14532d, #14532d) 19% 100% / 8% 40% no-repeat,
+    linear-gradient(#14532d, #14532d) 29% 100% / 4% 95% no-repeat,
+    linear-gradient(#14532d, #14532d) 35% 100% / 9% 60% no-repeat,
+    linear-gradient(#14532d, #14532d) 46% 100% / 5% 75% no-repeat,
+    linear-gradient(#14532d, #14532d) 53% 100% / 7% 45% no-repeat,
+    linear-gradient(#14532d, #14532d) 62% 100% / 4% 100% no-repeat,
+    linear-gradient(#14532d, #14532d) 68% 100% / 8% 65% no-repeat,
+    linear-gradient(#14532d, #14532d) 78% 100% / 5% 50% no-repeat,
+    linear-gradient(#14532d, #14532d) 85% 100% / 6% 85% no-repeat,
+    linear-gradient(#14532d, #14532d) 94% 100% / 7% 58% no-repeat;
 }
 
 /* Purely decorative -- echoes the printed board's two diagonal card

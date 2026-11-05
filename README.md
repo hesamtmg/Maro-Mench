@@ -7,6 +7,67 @@ Production runs on the shared server through
 [ParsServer](https://github.com/hesamtmg/ParsServer) (`projects/gimoo`); its
 server-specific settings live there, not in this repo.
 
+## Games
+
+| Game | Players | What it is |
+| --- | --- | --- |
+| 🎲 Ludo | 2–4 | Race all four pieces from your yard to home |
+| 🐍 Snakes & Ladders | 2–16 | Climb ladders, dodge snakes, first to 100 |
+| 🥏 OLO | 2 | Real-time physics disc flicking on an ice rink (also has an offline practice mode) |
+| 🏙️ Monopoly | 2–6 | Buy, build, trade, auction and bankrupt your friends |
+| 🌍 Conquest | 2–6 | Turn-based world-conquest strategy on a real map |
+| ⚡ FLICK (`flick-arena-v3.html`) | 2 | Standalone single-file prototype of OLO; no server needed |
+
+## Quick start: run it on your computer
+
+You need **Node.js 22+** and **PostgreSQL 16** (or Docker, which bundles
+Postgres for you).
+
+### Option A: Docker (easiest)
+
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), then:
+
+```bash
+git clone https://github.com/hesamtmg/Maro-Mench.git
+cd Maro-Mench
+cp backend/.env.example .env
+docker compose up --build -d
+docker compose exec backend npm run migration:run   # first run only
+```
+
+Open **http://localhost:5173**, register an account and pick a game.
+
+### Option B: Without Docker
+
+1. Start Postgres and create the database: `CREATE DATABASE gimoo;`
+2. In one terminal, start the backend:
+   ```bash
+   cd backend
+   cp .env.example .env      # set DB_USERNAME / DB_PASSWORD to match your Postgres
+   npm install
+   npm run migration:run
+   npm run start:dev         # http://localhost:3000
+   ```
+3. In a second terminal, start the frontend:
+   ```bash
+   cd frontend
+   cp .env.example .env
+   npm install
+   npm run dev               # http://localhost:5173
+   ```
+
+### Playing a multiplayer game on one computer
+
+Each player needs their own account. To try a match alone, open a normal
+window and a private/incognito window (they keep separate logins).
+Register a different user in each, create a room in one window, and join
+it from the other with the room code. Then press **Start game**.
+
+### FLICK (no setup)
+
+Double-click `flick-arena-v3.html` to open it in your browser. It loads
+its physics library from a CDN, so you need an internet connection.
+
 ## Project structure
 
 ```

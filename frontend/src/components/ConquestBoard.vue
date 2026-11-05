@@ -943,6 +943,17 @@ function nodeClasses(territoryId: string) {
             <stop offset="55%" :stop-color="g.base" />
             <stop offset="100%" :stop-color="g.dark" />
           </radialGradient>
+          <!-- Ocean: a faint latitude/longitude grid like a nautical chart. -->
+          <pattern id="cb-ocean-grid" width="50" height="50" patternUnits="userSpaceOnUse">
+            <path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(125, 211, 252, 0.07)" stroke-width="1" />
+          </pattern>
+          <radialGradient id="cb-ocean-glow" cx="50%" cy="45%" r="65%">
+            <stop offset="0%" stop-color="#1d4e7a" stop-opacity="0.55" />
+            <stop offset="100%" stop-color="#0a1222" stop-opacity="0" />
+          </radialGradient>
+          <filter id="cb-shallows-blur" x="-10%" y="-10%" width="120%" height="120%">
+            <feGaussianBlur stdDeviation="3" />
+          </filter>
           <filter id="cb-landmass-shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="1.4" stdDeviation="1.6" flood-color="#000" flood-opacity="0.45" />
           </filter>
@@ -951,6 +962,16 @@ function nodeClasses(territoryId: string) {
         <!-- Actual world coastlines, generated from public-domain Natural
              Earth geographic data (see continent-paths.ts) -- an original
              render of real geography, not traced from any game's art. -->
+        <rect x="-1000" y="-1000" width="3000" height="2620" fill="url(#cb-ocean-glow)" class="cb-ocean" />
+        <rect x="-1000" y="-1000" width="3000" height="2620" fill="url(#cb-ocean-grid)" class="cb-ocean" />
+        <!-- Shallow-water halo hugging every coastline. -->
+        <path
+          v-for="c in CONTINENTS"
+          :key="`shallows-${c.id}`"
+          :d="CONTINENT_PATHS[c.id]"
+          class="cb-shallows"
+          filter="url(#cb-shallows-blur)"
+        />
         <path
           v-for="c in CONTINENTS"
           :key="c.id"
@@ -1185,7 +1206,7 @@ function nodeClasses(territoryId: string) {
       </div>
       </div>
 
-      <div v-if="state" class="cb-status-bar">
+      <div v-if="state" class="cb-status-bar" :style="{ '--turn-color': playerColor(currentTurnSeat) }">
         <span class="cb-status-dot" :style="{ background: playerColor(currentTurnSeat) }" />
         <strong>{{ nameForSeat(currentTurnSeat) }}</strong>
         <span class="cb-status-phase" :class="`cb-phase-${state.phase}`">{{
@@ -1207,7 +1228,7 @@ function nodeClasses(territoryId: string) {
           :style="{ '--player-color': p.color ?? '#999' }"
         >
           <span class="cb-player-avatar" :style="{ background: p.color ?? '#999' }">{{
-            p.displayName.charAt(0).toUpperCase()
+            (p.displayName ?? "?").charAt(0).toUpperCase()
           }}</span>
           <div class="cb-player-info">
             <strong>{{ p.displayName }}</strong>
@@ -1465,8 +1486,12 @@ function nodeClasses(territoryId: string) {
 .conquest-map {
   width: 100%;
   aspect-ratio: 1000 / 620;
-  background: radial-gradient(ellipse at 50% 40%, #1c2b45, #0f1524);
-  border: 1px solid var(--color-border);
+  background: radial-gradient(ellipse at 50% 40%, #16304f, #0a1222 75%);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  box-shadow:
+    inset 0 0 60px rgba(0, 0, 0, 0.55),
+    0 20px 40px rgba(0, 0, 0, 0.45),
+    0 0 40px rgba(56, 130, 246, 0.12);
   border-radius: var(--radius);
   cursor: grab;
   /* Own the pointer instead of letting the browser use it for native
@@ -1574,8 +1599,20 @@ function nodeClasses(territoryId: string) {
   stroke-width: 0.75;
 }
 
+.cb-ocean {
+  pointer-events: none;
+}
+
+.cb-shallows {
+  fill: none;
+  stroke: rgba(125, 211, 252, 0.35);
+  stroke-width: 7;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .cb-territory-boundary {
-  fill-opacity: 0.4;
+  fill-opacity: 0.52;
   stroke: rgba(10, 10, 20, 0.55);
   stroke-width: 0.6;
   stroke-linejoin: round;
@@ -1792,18 +1829,25 @@ function nodeClasses(territoryId: string) {
 .cb-status-bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--turn-color, #9333ea) 22%, transparent), transparent 60%),
+    var(--color-surface);
+  border: 1px solid color-mix(in srgb, var(--turn-color, #9333ea) 40%, transparent);
+  border-left: 4px solid var(--turn-color, #9333ea);
   border-radius: var(--radius);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--turn-color, #9333ea) 18%, transparent);
 }
 
 .cb-status-dot {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 12px var(--turn-color, #9333ea);
 }
 
 .cb-status-phase {

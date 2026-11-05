@@ -18,6 +18,7 @@ import OloBoard from "../components/OloBoard.vue";
 import PlayerList from "../components/PlayerList.vue";
 import SnakesLaddersBoard from "../components/SnakesLaddersBoard.vue";
 import { useMySeat } from "../composables/useMySeat";
+import { prettyColor } from "../lib/player-colors";
 import { useAuthStore } from "../stores/auth.store";
 import { useRoomStore } from "../stores/room.store";
 import { useToastStore } from "../stores/toast.store";
@@ -502,6 +503,73 @@ const showTurnInfo = computed(
     !winnerName.value
 );
 
+// --- Visual theme ---------------------------------------------------
+// Each game gets its own icon + accent color, used by the header tile,
+// the ambient glow behind the board and the win screen.
+const GAME_THEMES: Record<string, { icon: string; accent: string; tagline: string }> = {
+  ludo: { icon: "🎲", accent: "#f43f5e", tagline: "Race all four pieces home" },
+  snakes_ladders: { icon: "🐍", accent: "#22c55e", tagline: "Climb ladders, dodge snakes" },
+  olo: { icon: "🥏", accent: "#38bdf8", tagline: "Flick your discs to score" },
+  monopoly: { icon: "🏙️", accent: "#f59e0b", tagline: "Buy, build and bankrupt" },
+  conquest: { icon: "🌍", accent: "#a855f7", tagline: "Conquer the world map" },
+};
+
+const gameTheme = computed(
+  () => GAME_THEMES[gameTypeCode.value ?? ""] ?? { icon: "🎮", accent: "#9333ea", tagline: "" }
+);
+
+function playerColor(seatIndex: number | null | undefined): string {
+  return prettyColor(roomStore.room?.players.find((p) => p.seatIndex === seatIndex)?.color);
+}
+
+function initialOf(name: string | undefined): string {
+  return (name ?? "?").trim().charAt(0).toUpperCase() || "?";
+}
+
+const currentTurnPlayer = computed(() =>
+  roomStore.room?.players.find((p) => p.seatIndex === roomStore.currentTurnSeat)
+);
+
+// 0..1 "how close to winning" per seat, drawn as a bar on each player
+// card so the race is readable at a glance.
+function playerProgress(seatIndex: number): number {
+  switch (gameTypeCode.value) {
+    case "ludo":
+      return ludoFinishedCount(seatIndex) / 4;
+    case "snakes_ladders":
+      return snakesLaddersPosition(seatIndex) / 100;
+    case "conquest":
+      return conquestTerritoryCount(seatIndex) / Math.max(1, TERRITORIES.length);
+    case "monopoly": {
+      const all = roomStore.room?.players.map((p) => monopolyNetWorthFor(p.seatIndex)) ?? [];
+      const max = Math.max(1, ...all);
+      return monopolyNetWorthFor(seatIndex) / max;
+    }
+    case "olo": {
+      const all = roomStore.room?.players.map((p) => oloScore(p.seatIndex)) ?? [];
+      const max = Math.max(1, ...all);
+      return oloScore(seatIndex) / max;
+    }
+    default:
+      return 0;
+  }
+}
+
+const winnerColor = computed(() => playerColor(roomStore.winnerSeat));
+
+// Deterministic confetti layout (no Math.random in render, so it doesn't
+// reshuffle on every re-render).
+const CONFETTI_COLORS = ["#f43f5e", "#f59e0b", "#22c55e", "#38bdf8", "#a855f7", "#facc15"];
+const confettiPieces = Array.from({ length: 48 }, (_, i) => ({
+  id: i,
+  left: (i * 37) % 100,
+  delay: ((i * 13) % 20) / 10,
+  duration: 2.6 + ((i * 7) % 10) / 5,
+  color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+  size: 6 + ((i * 5) % 7),
+  round: i % 3 === 0,
+}));
+
 const canStartGame = computed(() => {
   const room = roomStore.room;
   if (!room || !isAdmin.value) return false;
@@ -517,8 +585,9 @@ onMounted(() => {
 
 <template>
   <div
-    class="page-container-wide"
-    :class="{ 'page-wide-game': roomStore.boardState }"
+    class="page-container-wide room-page"
+    :class="[{ 'page-wide-game': roomStore.boardState }, `theme-${gameTypeCode ?? 'none'}`]"
+    :style="{ '--game-accent': gameTheme.accent }"
   >
     <p v-if="isLoading" class="text-muted text-center">Loading room…</p>
     <p v-else-if="loadError" class="error-text text-center">
@@ -527,41 +596,47 @@ onMounted(() => {
 
     <template v-else-if="roomStore.room">
       <div class="game-header">
-        <div class="header-title " style="display: flex;flex-direction: row;">
-          <div style="width: 100%;">
+        <div class="header-title">
+          <span class="game-icon" aria-hidden="true">{{ gameTheme.icon }}</span>
+          <div class="header-title-text">
             <h1 class="game-title">{{ roomStore.room.gameType.name }}</h1>
-            <button
-              v-if="roomStore.room.code"
-              class="code-chip"
-              title="Copy room code"
-              @click="handleCopyCode"
-            >
-              Code: <strong>{{ roomStore.room.code }}</strong> 📋
-            </button>
+            <div class="header-sub">
+              <span v-if="gameTheme.tagline" class="game-tagline">{{ gameTheme.tagline }}</span>
+              <button
+                v-if="roomStore.room.code"
+                class="code-chip"
+                title="Copy room code"
+                @click="handleCopyCode"
+              >
+                <span class="code-label">Code</span>
+                <strong>{{ roomStore.room.code }}</strong>
+                <span aria-hidden="true">📋</span>
+              </button>
+            </div>
           </div>
-          <div style="display:flex;flex-direction: row;width: 100%;">
+          <div class="header-room-actions">
             <button
               v-if="isAdmin"
-              style="margin-left: 10px;"
               class="btn btn-danger delete-room-btn"
               @click="handleDeleteRoom"
             >
-            Remove
+              Remove
             </button>
-
-            <button
-              style="margin-left: 10px;"
-              class="btn btn-secondary leave-btn "
-              @click="handleLeaveRoom"
-            >
+            <button class="btn btn-secondary leave-btn" @click="handleLeaveRoom">
               Leave
             </button>
           </div>
         </div>
 
         <div class="header-actions">
-          <div v-if="showTurnInfo" class="turn-pill">
-            <span>
+          <div
+            v-if="showTurnInfo"
+            class="turn-pill"
+            :class="{ 'turn-pill-mine': isMyTurn || monopolyMyBidTurn }"
+            :style="{ '--turn-color': playerColor(roomStore.currentTurnSeat) }"
+          >
+            <span class="turn-status">
+              <span class="turn-avatar">{{ initialOf(currentTurnPlayer?.displayName) }}</span>
               <strong v-if="isMyTurn" class="turn-badge turn-badge-mine"
                 >Your turn!</strong
               >
@@ -571,11 +646,7 @@ onMounted(() => {
                 >Your bid!</strong
               >
               <span v-else class="turn-badge">
-                {{
-                  roomStore.room.players.find(
-                    (p) => p.seatIndex === roomStore.currentTurnSeat
-                  )?.displayName ?? "Other player"
-                }}'s turn…
+                {{ currentTurnPlayer?.displayName ?? "Other player" }}'s turn…
               </span>
               <span
                 v-if="secondsLeft !== null"
@@ -666,9 +737,32 @@ onMounted(() => {
       <!-- Game over -->
       <div
         v-else-if="roomStore.room.status === 'finished' || winnerName"
-        class="card text-center"
+        class="card text-center game-over-card"
+        :style="{ '--winner-color': winnerColor }"
       >
-        <h2>🎉 {{ winnerName }} wins!</h2>
+        <div class="confetti" aria-hidden="true">
+          <span
+            v-for="piece in confettiPieces"
+            :key="piece.id"
+            class="confetti-piece"
+            :class="{ 'confetti-round': piece.round }"
+            :style="{
+              left: `${piece.left}%`,
+              background: piece.color,
+              width: `${piece.size}px`,
+              height: `${piece.round ? piece.size : piece.size * 1.6}px`,
+              animationDelay: `${piece.delay}s`,
+              animationDuration: `${piece.duration}s`,
+            }"
+          />
+        </div>
+        <div class="trophy" aria-hidden="true">🏆</div>
+        <p class="game-over-kicker">Game over</p>
+        <div v-if="winnerName" class="winner-badge">
+          <span class="winner-avatar">{{ initialOf(winnerName) }}</span>
+        </div>
+        <h2 class="winner-title">{{ winnerName ?? "Nobody" }} wins!</h2>
+        <p class="text-muted game-over-sub">{{ roomStore.room.gameType.name }} · GG everyone</p>
 
         <div v-if="monopolyNetWorth.length" class="net-worth-list">
           <div
@@ -734,17 +828,22 @@ onMounted(() => {
                 "
               >
                 <span
-                  class="color-dot"
+                  class="player-avatar"
                   :class="{ 'token-3d': gameTypeCode === 'monopoly' }"
-                  :style="gameTypeCode === 'monopoly' ? {} : { background: player.color ?? '#4f46e5' }"
+                  :style="{ '--p-color': prettyColor(player.color, '#4f46e5') }"
                 >
                   <img
                     v-if="gameTypeCode === 'monopoly'"
                     :src="tokenIconForSeat(player.seatIndex)"
                     alt=""
                   />
+                  <template v-else>{{ initialOf(player.displayName) }}</template>
                 </span>
-                <strong>{{ player.displayName }}</strong>
+                <span class="player-main">
+                <span class="player-name-line">
+                  <strong class="player-name">{{ player.displayName }}</strong>
+                  <span v-if="player.userId === authStore.user?.id" class="you-tag">you</span>
+                </span>
                 <span v-if="gameTypeCode === 'ludo'" class="text-muted">
                   Home: {{ ludoHomeCount(player.seatIndex) }} · Finished:
                   {{ ludoFinishedCount(player.seatIndex) }} / 4
@@ -762,6 +861,16 @@ onMounted(() => {
                 <span v-else-if="gameTypeCode === 'conquest'" class="text-muted">
                   {{ conquestTerritoryCount(player.seatIndex) }} territories
                   <template v-if="conquestEliminated(player.seatIndex)">· eliminated</template>
+                </span>
+                <span class="progress-track" aria-hidden="true">
+                  <span
+                    class="progress-fill"
+                    :style="{
+                      width: `${Math.round(Math.min(1, playerProgress(player.seatIndex)) * 100)}%`,
+                      background: prettyColor(player.color, '#4f46e5'),
+                    }"
+                  />
+                </span>
                 </span>
                 <span v-if="gameTypeCode === 'monopoly'" class="expand-caret">
                   {{ expandedMonopolySeat === player.seatIndex ? '▲' : '▼' }}
@@ -1057,15 +1166,124 @@ onMounted(() => {
 
 .header-title {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   text-align: left;
-  gap: 0.15rem;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.header-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.header-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.game-tagline {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.header-room-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+}
+
+.header-room-actions .btn {
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+}
+
+/* Glossy app-icon style tile carrying the game's emoji, tinted with the
+   game's accent color. */
+.game-icon {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.75rem;
+  border-radius: 16px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.28), transparent 55%),
+    linear-gradient(135deg, var(--game-accent), color-mix(in srgb, var(--game-accent) 45%, #000));
+  box-shadow:
+    0 8px 22px color-mix(in srgb, var(--game-accent) 45%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.25);
 }
 
 .game-title {
-  font-size: 1.35rem;
+  font-size: 1.6rem;
   margin: 0;
+  line-height: 1.05;
+  background: linear-gradient(90deg, #fff, color-mix(in srgb, var(--game-accent) 55%, #fff));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Soft colored glow behind the play area, in the game's accent color,
+   so each game has its own atmosphere. */
+.room-page {
+  position: relative;
+}
+
+.room-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 65% 45%, color-mix(in srgb, var(--game-accent) 16%, transparent), transparent 70%),
+    radial-gradient(40% 35% at 10% 90%, color-mix(in srgb, var(--game-accent) 10%, transparent), transparent 70%);
+}
+
+.turn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.turn-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--turn-color) 60%, #fff), var(--turn-color) 60%);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.85),
+    0 0 14px var(--turn-color);
+}
+
+.turn-pill-mine {
+  border-color: color-mix(in srgb, var(--turn-color) 70%, transparent) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--turn-color) 40%, transparent),
+    0 0 26px color-mix(in srgb, var(--turn-color) 35%, transparent);
+  animation: my-turn-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes my-turn-glow {
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--turn-color) 70%, transparent),
+      0 0 38px color-mix(in srgb, var(--turn-color) 55%, transparent);
+  }
 }
 
 /* One cohesive chip for turn status + dice + roll button, rather than
@@ -1078,7 +1296,8 @@ onMounted(() => {
   align-items: center;
   gap: 0.6rem;
   padding: 0.4rem 0.75rem;
-  background: var(--color-surface);
+  background: rgba(24, 14, 44, 0.72);
+  backdrop-filter: blur(10px);
   border: 1px solid var(--color-border);
   border-radius: 999px;
 }
@@ -1128,6 +1347,31 @@ onMounted(() => {
 
   .header-actions {
     justify-content: space-between;
+  }
+
+  .header-title {
+    flex-wrap: nowrap;
+    gap: 0.6rem;
+  }
+
+  .game-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 1.3rem;
+    border-radius: 12px;
+  }
+
+  .game-title {
+    font-size: 1.2rem;
+  }
+
+  .game-tagline {
+    display: none;
+  }
+
+  .header-room-actions {
+    margin-left: auto;
+    flex-shrink: 0;
   }
 
   .turn-pill {
@@ -1372,12 +1616,23 @@ onMounted(() => {
 }
 
 .code-chip {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
   cursor: pointer;
+}
+
+.code-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .code-chip:hover {
@@ -1390,8 +1645,9 @@ onMounted(() => {
 }
 
 .turn-badge-mine {
-  color: var(--color-primary);
+  color: #fff;
   font-size: 1.1rem;
+  text-shadow: 0 0 12px var(--turn-color);
 }
 
 /* Distinct from turn-badge-mine on purpose: this means "the main turn is
@@ -1501,5 +1757,247 @@ onMounted(() => {
 .celebrate-enter-from,
 .celebrate-leave-to {
   opacity: 0;
+}
+
+/* --- Player cards ---------------------------------------------------- */
+.player-status-panel .player-block + .player-block {
+  margin-top: 0.4rem;
+}
+
+.player-status-panel .player-row {
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.player-status-panel .player-row-active {
+  background: linear-gradient(90deg, rgba(147, 51, 234, 0.28), rgba(147, 51, 234, 0.06));
+  border-color: rgba(192, 132, 252, 0.45);
+  box-shadow: 0 0 18px rgba(147, 51, 234, 0.25);
+}
+
+.player-avatar {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--p-color) 55%, #fff), var(--p-color) 62%, color-mix(in srgb, var(--p-color) 70%, #000));
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.15),
+    0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
+.player-avatar.token-3d {
+  background: radial-gradient(circle at 35% 30%, #fff, #e5e7eb 60%, #9ca3af);
+  padding: 5px;
+}
+
+.player-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.player-row-active .player-avatar {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 16px var(--p-color);
+  animation: avatar-bob 1.4s ease-in-out infinite;
+}
+
+@keyframes avatar-bob {
+  50% {
+    transform: translateY(-2px) scale(1.05);
+  }
+}
+
+.player-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.player-name-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.you-tag {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--color-text-muted);
+}
+
+.player-main .text-muted {
+  font-size: 0.78rem;
+}
+
+.progress-track {
+  display: block;
+  height: 5px;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  box-shadow: 0 0 8px currentColor;
+  transition: width 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* --- Win screen ------------------------------------------------------ */
+.game-over-card {
+  position: relative;
+  overflow: hidden;
+  padding: 2.5rem 1.5rem 2rem;
+  max-width: 560px;
+  margin: 1rem auto;
+  background:
+    radial-gradient(80% 60% at 50% 0%, color-mix(in srgb, var(--winner-color) 30%, transparent), transparent 70%),
+    rgba(255, 255, 255, 0.05);
+  border-color: color-mix(in srgb, var(--winner-color) 45%, transparent);
+}
+
+.confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -20px;
+  border-radius: 2px;
+  opacity: 0.9;
+  animation-name: confetti-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.confetti-round {
+  border-radius: 50%;
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    transform: translateY(620px) rotate(720deg);
+  }
+}
+
+.trophy {
+  position: relative;
+  font-size: 4.5rem;
+  line-height: 1;
+  filter: drop-shadow(0 8px 18px rgba(250, 204, 21, 0.45));
+  animation: trophy-pop 0.9s cubic-bezier(0.2, 1.6, 0.4, 1) both, trophy-float 3s ease-in-out 0.9s infinite;
+}
+
+@keyframes trophy-pop {
+  from {
+    transform: scale(0.2) rotate(-20deg);
+    opacity: 0;
+  }
+}
+
+@keyframes trophy-float {
+  50% {
+    transform: translateY(-6px) rotate(3deg);
+  }
+}
+
+.game-over-kicker {
+  position: relative;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.winner-badge {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin: 0.5rem 0;
+}
+
+.winner-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--winner-color) 55%, #fff), var(--winner-color) 65%);
+  box-shadow:
+    0 0 0 3px #fff,
+    0 0 30px var(--winner-color);
+}
+
+.winner-title {
+  position: relative;
+  margin: 0.5rem 0 0.25rem;
+  font-size: 2rem;
+  background: linear-gradient(90deg, #fde68a, #fff, #fde68a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.game-over-sub {
+  position: relative;
+  margin: 0 0 1rem;
+}
+
+.game-over-card .net-worth-list,
+.game-over-card .btn {
+  position: relative;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti {
+    display: none;
+  }
+  .trophy,
+  .turn-pill-mine,
+  .player-row-active .player-avatar {
+    animation: none;
+  }
 }
 </style>

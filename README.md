@@ -1,7 +1,11 @@
-# MaroMench
+# GIMOO
 
-Online multiplayer Ludo and Snakes & Ladders , built with
-NestJS + Socket.io, Vue 3, and Postgres.
+Online multiplayer board games (Ludo, Snakes & Ladders and more), built with
+NestJS + Socket.io, Vue 3, and Postgres. Live at **https://gimoo.ir**.
+
+Production runs on the shared server through
+[ParsServer](https://github.com/hesamtmg/ParsServer) (`projects/gimoo`); its
+server-specific settings live there, not in this repo.
 
 ## Project structure
 
@@ -17,7 +21,7 @@ frontend/   Vue 3 + Vite SPA
 You need a running Postgres instance. Create the database:
 
 ```sql
-CREATE DATABASE maromench;
+CREATE DATABASE gimoo;
 ```
 
 ### 2. Backend
@@ -52,11 +56,11 @@ npm test              # unit tests (game engines, RoomsService)
 npm run test:e2e      # e2e tests (HTTP + WebSocket, needs a real Postgres)
 ```
 
-e2e tests use `.env.test` and expect a separate `maromench_test` database
+e2e tests use `.env.test` and expect a separate `gimoo_test` database
 so they never touch your dev data:
 
 ```sql
-CREATE DATABASE maromench_test;
+CREATE DATABASE gimoo_test;
 ```
 
 ```bash

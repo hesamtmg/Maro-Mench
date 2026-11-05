@@ -56,7 +56,7 @@ async function handleLogout() {
 <template>
   <div class="page-container-wide">
     <div class="row-between" style="margin-bottom: 1.5rem">
-      <h1>MaroMench</h1>
+      <h1>GIMOO</h1>
       <div class="row">
         <span class="text-muted">{{ authStore.user?.displayName }}</span>
         <RouterLink :to="{ name: 'stats' }" class="btn btn-secondary">🏆 Stats</RouterLink>

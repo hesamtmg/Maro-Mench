@@ -13,7 +13,7 @@ interface AuthState {
   isInitialized: boolean;
 }
 
-const STORED_USER_KEY = 'maromench_user';
+const STORED_USER_KEY = 'gimoo_user';
 
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({

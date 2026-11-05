@@ -207,7 +207,7 @@ onUnmounted(() => {
   <div class="page-container-wide">
     <div class="row-between" style="margin-bottom: 1.5rem">
       <div>
-        <h1 style="margin-bottom: 0.15rem">MaroMench</h1>
+        <h1 style="margin-bottom: 0.15rem">GIMOO</h1>
         <RouterLink :to="{ name: 'home' }" class="text-muted"
           >← Change game</RouterLink
         >

@@ -7,8 +7,8 @@ export const httpClient = axios.create({
   baseURL: API_BASE_URL,
 });
 
-const ACCESS_TOKEN_KEY = 'maromench_access_token';
-const REFRESH_TOKEN_KEY = 'maromench_refresh_token';
+const ACCESS_TOKEN_KEY = 'gimoo_access_token';
+const REFRESH_TOKEN_KEY = 'gimoo_refresh_token';
 
 export function getAccessToken(): string | null {
   return localStorage.getItem(ACCESS_TOKEN_KEY);

@@ -27,9 +27,9 @@ export class MailService {
       await this.transporter.sendMail({
         from: this.configService.get<string>('MAIL_FROM'),
         to,
-        subject: 'Reset your MaroMench password',
+        subject: 'Reset your GIMOO password',
         html: `
-          <p>We received a request to reset your MaroMench password.</p>
+          <p>We received a request to reset your GIMOO password.</p>
           <p><a href="${resetLink}">Click here to reset your password</a></p>
           <p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>
         `,

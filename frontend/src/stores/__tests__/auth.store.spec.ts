@@ -47,10 +47,10 @@ describe('auth store', () => {
       });
 
       expect(store.user).toEqual(mockUser);
-      expect(localStorage.getItem('maromench_access_token')).toBe(
+      expect(localStorage.getItem('gimoo_access_token')).toBe(
         'access-token',
       );
-      expect(localStorage.getItem('maromench_refresh_token')).toBe(
+      expect(localStorage.getItem('gimoo_refresh_token')).toBe(
         'refresh-token',
       );
     });
@@ -96,7 +96,7 @@ describe('auth store', () => {
       await store.logout();
 
       expect(store.user).toBeNull();
-      expect(localStorage.getItem('maromench_access_token')).toBeNull();
+      expect(localStorage.getItem('gimoo_access_token')).toBeNull();
       expect(store.isAuthenticated).toBe(false);
     });
 
@@ -130,7 +130,7 @@ describe('auth store', () => {
 
   describe('initializeFromStorage', () => {
     it('restores the user from localStorage when both user and token exist', () => {
-      localStorage.setItem('maromench_user', JSON.stringify(mockUser));
+      localStorage.setItem('gimoo_user', JSON.stringify(mockUser));
       httpClient.storeTokens({
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
@@ -144,7 +144,7 @@ describe('auth store', () => {
     });
 
     it('does not restore a user if the access token is missing', () => {
-      localStorage.setItem('maromench_user', JSON.stringify(mockUser));
+      localStorage.setItem('gimoo_user', JSON.stringify(mockUser));
       // No token stored.
 
       const store = useAuthStore();
@@ -154,7 +154,7 @@ describe('auth store', () => {
     });
 
     it('handles corrupted localStorage data gracefully', () => {
-      localStorage.setItem('maromench_user', '{not valid json');
+      localStorage.setItem('gimoo_user', '{not valid json');
       httpClient.storeTokens({ accessToken: 'a', refreshToken: 'b' });
 
       const store = useAuthStore();

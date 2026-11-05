@@ -33,7 +33,7 @@ async function handleSubmit() {
 <template>
   <div class="page-container">
     <div class="card">
-      <h1 class="text-center">MaroMench</h1>
+      <h1 class="text-center">GIMOO</h1>
       <p class="text-muted text-center">Log in to play  &amp; </p>
 
       <form class="stack" @submit.prevent="handleSubmit">

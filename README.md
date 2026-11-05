@@ -31,18 +31,15 @@ Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), then:
 git clone https://github.com/hesamtmg/Maro-Mench.git
 cd Maro-Mench
 cp backend/.env.example .env      # Windows Command Prompt: copy backend\.env.example .env
-```
-
-Open the new `.env` file (in the repo root, next to `docker-compose.yml`)
-and change `RUN_MIGRATIONS_ON_BOOT=false` to `RUN_MIGRATIONS_ON_BOOT=true`,
-so the database tables are created on first start. Then:
-
-```bash
 docker compose up --build -d
 ```
 
+The `.env` file must sit in the repo root, next to `docker-compose.yml`.
+On first start a one-off `migrate` container creates the database tables,
+then the backend starts.
+
 Open **http://localhost:5173**, register an account and pick a game.
-If something fails, `docker compose logs backend` shows why.
+If something fails, `docker compose logs migrate backend` shows why.
 
 ### Option B: Without Docker
 
@@ -159,17 +156,21 @@ cp backend/.env.example .env   # docker-compose reads vars from here
 docker compose up --build
 ```
 
-This starts Postgres, the backend, and the frontend (served via nginx).
-The production image contains only compiled code (no `ts-node`), so
-`npm run migration:run` does not work inside it. Instead, set
-`RUN_MIGRATIONS_ON_BOOT=true` in `.env` and the backend applies pending
-migrations when it starts. That is safe for a single instance such as a
-local setup.
+This starts Postgres, a one-off `migrate` job, the backend, and the
+frontend (served via nginx). The `migrate` job runs
+`node dist/database/migrate.js` (also available as
+`npm run migration:run:prod`), applies any pending migrations, and exits;
+the backend only starts once it has succeeded. Because it is a single job
+that finishes before the backend starts, instances never race to migrate.
 
-Otherwise, migrations are intentionally **not** run automatically on container
-start — this avoids multiple instances racing to migrate, or a routine
-restart accidentally applying a new, unreviewed migration in production.
-Run them explicitly as a deploy step instead.
+The backend image contains only compiled code (no `ts-node`), so the
+TypeScript `npm run migration:run` script does not work inside it. To
+migrate by hand, run `docker compose run --rm migrate`.
+
+The backend itself still does **not** migrate on start unless
+`RUN_MIGRATIONS_ON_BOOT=true`, so restarting the backend container never
+applies a migration. Note that `docker compose up` does run the `migrate`
+job, so new migrations are applied whenever you bring the stack up.
 
 ## Environment variables
 

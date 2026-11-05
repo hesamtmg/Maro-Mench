@@ -16,6 +16,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-off job: applies any pending database migrations, then exits.
+  # The backend waits for it to finish successfully before starting, so a
+  # fresh `docker compose up` creates the schema with no manual step.
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ['node', 'dist/database/migrate.js']
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_DATABASE: ${DB_DATABASE:-gimoo}
+
   backend:
     build:
       context: ./backend
@@ -24,6 +44,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -43,8 +65,8 @@ services:
       MAIL_FROM: ${MAIL_FROM}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       MATCHMAKING_FILL_WAIT_MS: ${MATCHMAKING_FILL_WAIT_MS:-15000}
-      # Set to true in .env for a single local instance so the schema is
-      # created on first start (the image has no ts-node for migration:run).
+      # Not needed with the migrate service above; kept for setups that
+      # prefer migrating from the app itself.
       RUN_MIGRATIONS_ON_BOOT: ${RUN_MIGRATIONS_ON_BOOT:-false}
     ports:
       - '3000:3000'

@@ -30,12 +30,19 @@ Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), then:
 ```bash
 git clone https://github.com/hesamtmg/Maro-Mench.git
 cd Maro-Mench
-cp backend/.env.example .env
+cp backend/.env.example .env      # Windows Command Prompt: copy backend\.env.example .env
+```
+
+Open the new `.env` file (in the repo root, next to `docker-compose.yml`)
+and change `RUN_MIGRATIONS_ON_BOOT=false` to `RUN_MIGRATIONS_ON_BOOT=true`,
+so the database tables are created on first start. Then:
+
+```bash
 docker compose up --build -d
-docker compose exec backend npm run migration:run   # first run only
 ```
 
 Open **http://localhost:5173**, register an account and pick a game.
+If something fails, `docker compose logs backend` shows why.
 
 ### Option B: Without Docker
 
@@ -153,13 +160,13 @@ docker compose up --build
 ```
 
 This starts Postgres, the backend, and the frontend (served via nginx).
-On first run, apply migrations inside the backend container:
+The production image contains only compiled code (no `ts-node`), so
+`npm run migration:run` does not work inside it. Instead, set
+`RUN_MIGRATIONS_ON_BOOT=true` in `.env` and the backend applies pending
+migrations when it starts. That is safe for a single instance such as a
+local setup.
 
-```bash
-docker compose exec backend npm run migration:run
-```
-
-Migrations are intentionally **not** run automatically on container
+Otherwise, migrations are intentionally **not** run automatically on container
 start — this avoids multiple instances racing to migrate, or a routine
 restart accidentally applying a new, unreviewed migration in production.
 Run them explicitly as a deploy step instead.

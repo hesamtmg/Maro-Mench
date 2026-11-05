@@ -43,6 +43,9 @@ services:
       MAIL_FROM: ${MAIL_FROM}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       MATCHMAKING_FILL_WAIT_MS: ${MATCHMAKING_FILL_WAIT_MS:-15000}
+      # Set to true in .env for a single local instance so the schema is
+      # created on first start (the image has no ts-node for migration:run).
+      RUN_MIGRATIONS_ON_BOOT: ${RUN_MIGRATIONS_ON_BOOT:-false}
     ports:
       - '3000:3000'
 

@@ -159,8 +159,16 @@ let ctx: CanvasRenderingContext2D | null = null;
 let engine: Matter.Engine | null = null;
 let world: Matter.World | null = null;
 let wallBodies: Matter.Body[] = [];
-let boardW = 380;
-let boardH = 640;
+// The physics world is ALWAYS this fixed size, on every device. The canvas
+// is just scaled to fit the screen (viewScale). Simulating in raw screen
+// pixels made a phone's world smaller than a desktop's, so relayed live
+// positions landed in the wrong place on the other player's screen, shots
+// travelled a different distance per device, and any resize mid-shot
+// (very common on mobile) rebuilt every body and killed its velocity.
+const BOARD_ASPECT = 0.58;
+const boardW = 400;
+const boardH = boardW / BOARD_ASPECT;
+let viewScale = 1;
 let dpr = 1;
 
 interface DiscEntry {
@@ -401,8 +409,55 @@ function isMoving(): boolean {
   return discEntries.some((d) => d.alive && Matter.Body.getSpeed(d.body) > 0.06);
 }
 
+// Hard cap on launch speed (physics units per 16.6ms step). Without it the
+// light discs' mass factor (~16x) sent them through the walls in one step.
+const MAX_LAUNCH_SPEED = 42;
+
+function launchDisc(d: DiscEntry, vx: number, vy: number) {
+  const massFactor = mediumMassRef / d.body.mass;
+  let lvx = vx * 16.6 * massFactor;
+  let lvy = vy * 16.6 * massFactor;
+  const s = Math.hypot(lvx, lvy);
+  if (s > MAX_LAUNCH_SPEED) {
+    lvx *= MAX_LAUNCH_SPEED / s;
+    lvy *= MAX_LAUNCH_SPEED / s;
+  }
+  Body.setVelocity(d.body, { x: lvx, y: lvy });
+}
+
 function stepEngine(delta: number) {
-  if (engine) Engine.update(engine, delta);
+  if (!engine) return;
+  // Sub-step so no disc moves more than ~a third of its radius per step,
+  // which keeps fast discs from tunnelling through each other or the walls.
+  let maxRatio = 0;
+  for (const d of discEntries) {
+    if (!d.alive) continue;
+    maxRatio = Math.max(maxRatio, Body.getSpeed(d.body) / Math.max(4, d.r * 0.33));
+  }
+  const steps = Math.min(12, Math.max(Math.ceil(delta / 16.6), Math.ceil(maxRatio)));
+  for (let i = 0; i < steps; i++) Engine.update(engine, delta / steps);
+  keepDiscsOnBoard();
+}
+
+// Safety net: if anything ever ends up outside the rink, put it back
+// inside and bounce it, rather than letting it vanish off the board.
+function keepDiscsOnBoard() {
+  for (const d of discEntries) {
+    if (!d.alive) continue;
+    const p = d.body.position;
+    const v = d.body.velocity;
+    let { x, y } = p;
+    let vx = v.x;
+    let vy = v.y;
+    if (x < d.r) { x = d.r; vx = Math.abs(vx) * 0.5; }
+    else if (x > boardW - d.r) { x = boardW - d.r; vx = -Math.abs(vx) * 0.5; }
+    if (y < d.r) { y = d.r; vy = Math.abs(vy) * 0.5; }
+    else if (y > boardH - d.r) { y = boardH - d.r; vy = -Math.abs(vy) * 0.5; }
+    if (x !== p.x || y !== p.y) {
+      Body.setPosition(d.body, { x, y });
+      Body.setVelocity(d.body, { x: vx, y: vy });
+    }
+  }
 }
 
 function returnDiscToFreeZone(d: DiscEntry) {
@@ -520,8 +575,7 @@ function aiTakeShot() {
   const speed = Math.min(dist * 0.012 + Math.random() * 0.3, 3.2);
   const vx = Math.cos(ang) * speed;
   const vy = Math.sin(ang) * speed;
-  const massFactor = mediumMassRef / d.body.mass;
-  Body.setVelocity(d.body, { x: vx * 16.6 * massFactor, y: vy * 16.6 * massFactor });
+  launchDisc(d, vx, vy);
   d.used = true;
   animating = true;
 }
@@ -531,52 +585,27 @@ function resizeCanvas() {
   const container = containerEl.value;
   const canvas = canvasEl.value;
   if (!container || !canvas || !ctx) return;
-  const availW = container.clientWidth - 16;
-  const availH = container.clientHeight - 16;
-  let w = availW;
-  let h = w / 0.58;
-  if (h > availH) {
-    h = availH;
-    w = h * 0.58;
+  const availW = Math.max(1, container.clientWidth - 16);
+  const availH = Math.max(1, container.clientHeight - 16);
+  let cssW = availW;
+  let cssH = cssW / BOARD_ASPECT;
+  if (cssH > availH) {
+    cssH = availH;
+    cssW = cssH * BOARD_ASPECT;
   }
-  const newW = Math.max(260, w);
-  const newH = Math.max(440, h);
-  if (Math.abs(newW - boardW) < 1 && Math.abs(newH - boardH) < 1 && canvas.width > 0) return;
+  const newDpr = window.devicePixelRatio || 1;
+  const newScale = cssW / boardW;
+  if (Math.abs(newScale - viewScale) < 0.001 && newDpr === dpr && canvas.width > 0) return;
 
-  const prevW = boardW;
-  const prevH = boardH;
-  boardW = newW;
-  boardH = newH;
-  dpr = window.devicePixelRatio || 1;
-  canvas.width = boardW * dpr;
-  canvas.height = boardH * dpr;
-  canvas.style.width = `${boardW}px`;
-  canvas.style.height = `${boardH}px`;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  if (engine && world) {
-    const sx = boardW / prevW;
-    const sy = boardH / prevH;
-    discEntries.forEach((d) => {
-      if (!d.alive) return;
-      const oldPos = d.body.position;
-      const newX = oldPos.x * sx;
-      const newY = oldPos.y * sy;
-      const newR = d.r * sx;
-      Composite.remove(world!, d.body);
-      const newBody = Bodies.circle(newX, newY, newR, {
-        density: d.body.density,
-        frictionAir: d.body.frictionAir,
-        restitution: d.body.restitution,
-        friction: d.body.friction,
-        label: 'disc',
-      });
-      Composite.add(world!, newBody);
-      d.body = newBody;
-      d.r = newR;
-    });
-    buildWalls();
-  }
+  viewScale = newScale;
+  dpr = newDpr;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.width = `${cssW}px`;
+  canvas.style.height = `${cssH}px`;
+  // Draw in physics-world units; the transform maps them onto the screen.
+  // Physics bodies are never touched here, so a resize mid-shot is harmless.
+  ctx.setTransform(dpr * viewScale, 0, 0, dpr * viewScale, 0, 0);
 }
 
 // ---------------- Rendering --------------------------------------------
@@ -857,7 +886,11 @@ function getPointer(evt: MouseEvent | TouchEvent) {
       : 'changedTouches' in evt && evt.changedTouches[0]
         ? evt.changedTouches[0]
         : (evt as MouseEvent);
-  return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  // Screen pixels -> physics-world units.
+  return {
+    x: (t.clientX - rect.left) / viewScale,
+    y: (t.clientY - rect.top) / viewScale,
+  };
 }
 
 function findMyDiscAt(pt: { x: number; y: number }): DiscEntry | null {
@@ -951,8 +984,7 @@ function onUp() {
     return;
   }
 
-  const massFactor = mediumMassRef / d.body.mass;
-  Body.setVelocity(d.body, { x: vx * 16.6 * massFactor, y: vy * 16.6 * massFactor });
+  launchDisc(d, vx, vy);
   d.used = true;
   animating = true;
 }
@@ -963,8 +995,9 @@ watch(
   (payload) => {
     if (!payload || props.mode !== 'online') return;
     for (const pos of payload.positions) {
+      // Positions arrive as board fractions (see livePositions emit).
       const entry = discEntries.find((d) => d.id === pos.id);
-      if (entry) Body.setPosition(entry.body, { x: pos.x, y: pos.y });
+      if (entry) Body.setPosition(entry.body, { x: pos.x * boardW, y: pos.y * boardH });
     }
   },
 );
@@ -1015,7 +1048,12 @@ function loop(now: number) {
         emit('livePositions', {
           positions: discEntries
             .filter((d) => d.alive)
-            .map((d) => ({ id: d.id, x: d.body.position.x, y: d.body.position.y })),
+            // Board fractions, not pixels, like boardState -- device-independent.
+            .map((d) => ({
+              id: d.id,
+              x: d.body.position.x / boardW,
+              y: d.body.position.y / boardH,
+            })),
         });
       }
     } else if (dragging && iAmShooting) {
@@ -1027,21 +1065,37 @@ function loop(now: number) {
 }
 
 // ---------------- Lifecycle ---------------------------------------------
-onMounted(() => {
-  const canvas = canvasEl.value;
+// The canvas only exists while the game screen is shown (local mode starts
+// on the title screen), so bind to it whenever the element appears rather
+// than only once at mount -- otherwise local mode never got a context.
+function attachCanvas(canvas: HTMLCanvasElement | null, prev?: HTMLCanvasElement | null) {
+  if (prev) {
+    prev.removeEventListener('mousedown', onDown);
+    prev.removeEventListener('mousemove', onMove);
+    prev.removeEventListener('touchstart', onDown);
+    prev.removeEventListener('touchmove', onMove);
+    prev.removeEventListener('touchend', onUp);
+  }
+  resizeObserver?.disconnect();
+  ctx = null;
   if (!canvas) return;
   ctx = canvas.getContext('2d');
-
+  canvas.width = 0; // force resizeCanvas to size the fresh element
   canvas.addEventListener('mousedown', onDown);
   canvas.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onUp);
   canvas.addEventListener('touchstart', onDown, { passive: false });
   canvas.addEventListener('touchmove', onMove, { passive: false });
   canvas.addEventListener('touchend', onUp, { passive: false });
-
   resizeObserver = new ResizeObserver(() => resizeCanvas());
   if (containerEl.value) resizeObserver.observe(containerEl.value);
   resizeCanvas();
+}
+
+watch(canvasEl, (canvas, prev) => attachCanvas(canvas, prev), { flush: 'post' });
+
+onMounted(() => {
+  window.addEventListener('mouseup', onUp);
+  attachCanvas(canvasEl.value);
 
   if (props.mode === 'online' && props.boardState) {
     setupEngine(props.boardState);
@@ -1054,6 +1108,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (rafHandle) cancelAnimationFrame(rafHandle);
+  window.removeEventListener('mouseup', onUp);
   resizeObserver?.disconnect();
   clearTimeout(toastTimer);
   teardownEngine();

@@ -1327,22 +1327,16 @@ onMounted(() => {
    -- stack them and let each take the full width instead of squeezing
    together. */
 @media (max-width: 640px) {
+  /* Deliberately NOT sticky: a pinned header took a large slice of a
+     phone screen and sat on top of the board while scrolling or panning
+     (and on top of the board's own panels). It scrolls away with the
+     page instead, and is kept compact so the board starts higher up. */
   .game-header {
     flex-direction: column;
     align-items: stretch;
-    /* Pinned to the top of the viewport on mobile so the turn/dice/leave
-       controls stay reachable while scrolling down to the board or the
-       activity log below. */
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    margin-left: -1.25rem;
-    margin-right: -1.25rem;
-    padding-left: 1.25rem;
-    padding-right: 1.25rem;
-    padding-top: 0.75rem;
-    background: var(--color-bg);
-    background-image: var(--color-bg-gradient);
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
   }
 
   .header-actions {
@@ -1351,18 +1345,26 @@ onMounted(() => {
 
   .header-title {
     flex-wrap: nowrap;
-    gap: 0.6rem;
+    gap: 0.5rem;
+  }
+
+  .header-title-text {
+    flex: 1 1 auto;
+    overflow: hidden;
   }
 
   .game-icon {
-    width: 40px;
-    height: 40px;
-    font-size: 1.3rem;
-    border-radius: 12px;
+    width: 34px;
+    height: 34px;
+    font-size: 1.1rem;
+    border-radius: 10px;
   }
 
   .game-title {
-    font-size: 1.2rem;
+    font-size: 1.05rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .game-tagline {
@@ -1372,16 +1374,38 @@ onMounted(() => {
   .header-room-actions {
     margin-left: auto;
     flex-shrink: 0;
+    gap: 0.35rem;
+  }
+
+  .header-room-actions .btn,
+  .leave-btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
   }
 
   .turn-pill {
     border-radius: var(--radius);
     justify-content: space-between;
+    gap: 0.4rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.85rem;
   }
 
-  .leave-btn {
-    padding: 0.45rem 1rem;
-    font-size: 0.85rem;
+  .turn-pill .btn {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+  }
+
+  .turn-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 0.7rem;
+  }
+
+  .turn-status {
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 0.35rem;
   }
 }
 

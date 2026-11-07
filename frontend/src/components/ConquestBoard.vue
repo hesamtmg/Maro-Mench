@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DiceRoller from "./DiceRoller.vue";
 import {
   CONTINENTS,
@@ -105,15 +105,105 @@ const VIEW_H = 620;
 // coordinate space regardless of how the viewBox is currently framed.
 const svgRef = ref<SVGSVGElement | null>(null);
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 5;
+const MAX_ZOOM = 6;
 const zoom = ref(MIN_ZOOM);
 const viewX = ref(0);
 const viewY = ref(0);
-const viewW = computed(() => VIEW_W / zoom.value);
-const viewH = computed(() => VIEW_H / zoom.value);
+
+// --- Phone-sized layout ---
+// On a phone the whole 1000-unit-wide world squeezed into ~360px renders
+// territory names ~2px tall. Below COMPACT_WIDTH the map switches to a
+// square frame (more height to work with), opens zoomed in to a legible
+// scale, and markers get a modest size boost. The boost is capped because
+// the densest territories are only ~20 map units apart -- beyond ~1.3x the
+// markers would overlap no matter how far you zoom in.
+const COMPACT_WIDTH = 600;
+const COMPACT_ASPECT = 1;
+const COMPACT_START_PX_PER_UNIT = 1;
+const MARKER_TARGET_PX_PER_UNIT = 1.25;
+const MAX_MARKER_SCALE = 1.3;
+const mapPixelWidth = ref(0);
+const isCompact = computed(() => mapPixelWidth.value > 0 && mapPixelWidth.value < COMPACT_WIDTH);
+const mapAspect = computed(() => (isCompact.value ? COMPACT_ASPECT : VIEW_W / VIEW_H));
+// The viewBox at zoom 1: the full world on desktop; on a phone the full
+// map height and a square slice of its width (pan sideways for the rest).
+const baseViewW = computed(() => Math.min(VIEW_W, VIEW_H * mapAspect.value));
+const baseViewH = computed(() => baseViewW.value / mapAspect.value);
+const viewW = computed(() => baseViewW.value / zoom.value);
+const viewH = computed(() => baseViewH.value / zoom.value);
 const viewBoxStr = computed(
   () => `${viewX.value} ${viewY.value} ${viewW.value} ${viewH.value}`
 );
+const pxPerUnit = computed(() =>
+  mapPixelWidth.value > 0 ? mapPixelWidth.value / viewW.value : 1
+);
+const markerScale = computed(() =>
+  Math.max(1, Math.min(MAX_MARKER_SCALE, MARKER_TARGET_PX_PER_UNIT / pxPerUnit.value))
+);
+// Names under ~4px on screen are just noise on a small map -- hide them
+// until zoomed in far enough (a selected/targeted territory still shows
+// its name, and the action panel names both ends of a move).
+const showNodeLabels = computed(
+  () => !isCompact.value || pxPerUnit.value * markerScale.value >= 0.75
+);
+
+let resizeObserver: ResizeObserver | null = null;
+let initialFramingDone = false;
+
+function frameInitialView() {
+  if (!isCompact.value) {
+    zoom.value = MIN_ZOOM;
+    viewX.value = 0;
+    viewY.value = 0;
+    return;
+  }
+  zoom.value = Math.max(
+    MIN_ZOOM,
+    Math.min(MAX_ZOOM, (COMPACT_START_PX_PER_UNIT * baseViewW.value) / mapPixelWidth.value)
+  );
+  // Open on my own territories when I have some, otherwise mid-map.
+  const s = state.value;
+  const mine =
+    s && props.mySeatIndex != null
+      ? TERRITORIES.filter((t) => s.owner[t.id] === props.mySeatIndex)
+      : [];
+  const focus = mine.length
+    ? {
+        x: mine.reduce((sum, t) => sum + t.x, 0) / mine.length,
+        y: mine.reduce((sum, t) => sum + t.y, 0) / mine.length,
+      }
+    : { x: VIEW_W / 2, y: VIEW_H / 2 };
+  viewX.value = focus.x - viewW.value / 2;
+  viewY.value = focus.y - viewH.value / 2;
+  clampView();
+}
+
+onMounted(() => {
+  const svg = svgRef.value;
+  if (!svg) return;
+  const measure = () => {
+    const width = svg.getBoundingClientRect().width;
+    if (width <= 0) return;
+    const wasCompact = isCompact.value;
+    mapPixelWidth.value = width;
+    if (!initialFramingDone || wasCompact !== isCompact.value) {
+      initialFramingDone = true;
+      frameInitialView();
+    } else {
+      clampView();
+    }
+  };
+  measure();
+  if (typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(svg);
+  }
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+});
 
 function clampView() {
   viewX.value = Math.max(0, Math.min(VIEW_W - viewW.value, viewX.value));
@@ -143,8 +233,8 @@ function applyZoomAnchored(newZoomRaw: number, anchor: { x: number; y: number })
   const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomRaw));
   const fx = (anchor.x - viewX.value) / viewW.value;
   const fy = (anchor.y - viewY.value) / viewH.value;
-  const newW = VIEW_W / newZoom;
-  const newH = VIEW_H / newZoom;
+  const newW = baseViewW.value / newZoom;
+  const newH = baseViewH.value / newZoom;
   viewX.value = anchor.x - fx * newW;
   viewY.value = anchor.y - fy * newH;
   zoom.value = newZoom;
@@ -917,7 +1007,7 @@ function nodeClasses(territoryId: string) {
       <svg
         ref="svgRef"
         class="conquest-map"
-        :class="{ 'cb-map-panning': isPanning }"
+        :class="{ 'cb-map-panning': isPanning, 'cb-map-compact': isCompact }"
         :viewBox="viewBoxStr"
         preserveAspectRatio="xMidYMid meet"
         @pointerdown="onMapPointerDown"
@@ -1029,7 +1119,7 @@ function nodeClasses(territoryId: string) {
           :key="node.id"
           :class="nodeClasses(node.id)"
           class="cb-node"
-          :transform="`translate(${node.cx}, ${node.cy})`"
+          :transform="`translate(${node.cx}, ${node.cy}) scale(${markerScale})`"
           :style="{ '--rank-color': armyRankByTerritory[node.id].color }"
           @click="onTerritoryClick(node.id)"
         >
@@ -1114,19 +1204,24 @@ function nodeClasses(territoryId: string) {
               />
             </template>
           </g>
-          <circle cx="4.2" cy="3.4" r="3.6" class="cb-node-armybadge" />
-          <text x="4.2" y="4.9" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
+          <circle cx="4.4" cy="3.4" r="4" class="cb-node-armybadge" />
+          <text x="4.4" y="5.25" class="cb-node-armies">{{ armiesOn(node.id) }}</text>
           <!-- Alternating vertical offset breaks label collisions between
                neighbors that happen to share almost the same y (a few real
                -world clusters, e.g. Etruria/Illyria, do). -->
-          <text x="0" :y="nodeIndex % 2 === 0 ? -13 : -10.5" class="cb-node-label">{{ node.name }}</text>
+          <text
+            v-if="showNodeLabels || node.id === selectedFrom || node.id === selectedTo"
+            x="0"
+            :y="nodeIndex % 2 === 0 ? -13 : -10.5"
+            class="cb-node-label"
+          >{{ node.name }}</text>
         </g>
 
         <!-- Continent bonus badges, floated above each landmass. -->
         <g
           v-for="c in continentLabelPositions"
           :key="`badge-${c.id}`"
-          :transform="`translate(${c.x}, ${c.y})`"
+          :transform="`translate(${c.x}, ${c.y}) scale(${markerScale})`"
           class="cb-continent-badge"
           :class="{ 'cb-continent-badge-owned': continentFullOwners[c.id] != null }"
         >
@@ -1503,6 +1598,12 @@ function nodeClasses(territoryId: string) {
   cursor: grabbing;
 }
 
+/* Must match COMPACT_ASPECT in the script, so the viewBox fills the frame
+   exactly instead of letterboxing. */
+.conquest-map.cb-map-compact {
+  aspect-ratio: 1 / 1;
+}
+
 .cb-zoom-controls {
   position: absolute;
   right: 0.6rem;
@@ -1767,7 +1868,7 @@ function nodeClasses(territoryId: string) {
 }
 
 .cb-node-armies {
-  font-size: 4.5px;
+  font-size: 5.2px;
   font-weight: 800;
   fill: #fff;
   text-anchor: middle;
@@ -2260,13 +2361,32 @@ function nodeClasses(territoryId: string) {
 }
 
 @media (max-width: 640px) {
-  .cb-node-label {
-    font-size: 6px;
+  .conquest-wrap {
+    gap: 0.6rem;
+  }
+
+  /* Stack the side panels under the map at full width instead of a
+     290px column that leaves a dead strip on the right. */
+  .conquest-main,
+  .conquest-side {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .cb-watermark {
+    display: none;
+  }
+
+  .cb-zoom-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 1.3rem;
   }
 
   .cb-trophies-float {
     max-height: 78%;
-    font-size: 0.6rem;
+    font-size: 0.72rem;
   }
 
   .cb-trophies-body {
